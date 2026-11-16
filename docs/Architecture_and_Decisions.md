@@ -22,7 +22,7 @@
 1. **Heuristic HTML Image Selection**:
    - HTML candidate extraction prioritizes `og:image`, `twitter:image`, largest `srcset` descriptors, `data-src` lazy-loading attributes, and `<img>` elements scored by vehicle keywords, declared dimensions, and container context. While effective for standard vehicle listing pages, pages that render images exclusively via client-side JavaScript or obfuscated canvas elements require a conditional browser strategy.
 2. **Synchronous Ingestion Latency**:
-   - Image retrieval, validation, and transient retries run synchronously within the HTTP request lifecycle (bounded by `Retrieval:TimeoutSeconds`). If slow upstream sources or headless browser extraction are introduced later, ingestion can be moved to a background queue while preserving the existing `ImageStatus` (`Processing`, `Completed`, `Failed`) model.
+   - Image retrieval, validation, and transient retries run synchronously within the HTTP request lifecycle (bounded by `Retrieval:TimeoutSeconds`). If slow upstream sources or headless browser extraction are introduced later, ingestion can be moved to a background queue; the current implementation persists completed images synchronously.
 3. **Cross-Store Compensation**:
    - Local filesystem operations and SQL Server transactions are not two-phase atomic. The pipeline orders writes so that database failures trigger a compensating file delete, and superseded files on replacement are deleted only after the database commit succeeds. Any failed compensating delete logs the orphaned `StorageKey` at `Error` level for scheduled reconciliation.
 4. **Network Egress Defense-in-Depth**:

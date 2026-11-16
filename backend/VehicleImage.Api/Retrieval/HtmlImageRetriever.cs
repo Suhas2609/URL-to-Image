@@ -28,7 +28,7 @@ public sealed record ImageCandidate(
     int Score
 );
 
-public sealed partial class HtmlImageRetriever : IImageRetriever
+public sealed partial class HtmlImageRetriever
 {
     private static readonly string[] VehicleKeywords =
     [
@@ -76,27 +76,6 @@ public sealed partial class HtmlImageRetriever : IImageRetriever
         _logger = logger;
     }
 
-    public string Name => "Html";
-
-    public async Task<RetrievedImage> RetrieveAsync(Uri source, CancellationToken cancellationToken = default)
-    {
-        var (initialResponse, charset) = await _directRetriever.FetchWithRetriesAsync(source, Name, cancellationToken);
-        await using (initialResponse)
-        {
-            string html = DecodeHtml(initialResponse.Content, charset);
-            await foreach (var candidate in RetrieveCandidatesFromHtmlAsync(
-                html,
-                source,
-                initialResponse.FinalSourceUrl,
-                cancellationToken))
-            {
-                return candidate;
-            }
-        }
-
-        throw ImageIngestionException.NoImageFound();
-    }
-
     public async IAsyncEnumerable<RetrievedImage> RetrieveCandidatesFromHtmlAsync(
         string html,
         Uri originalSourceUrl,
@@ -126,7 +105,7 @@ public sealed partial class HtmlImageRetriever : IImageRetriever
             {
                 var (fetched, _) = await _directRetriever.FetchWithRetriesAsync(
                     candidate.Url,
-                    Name,
+                    "Html",
                     cancellationToken);
 
                 retrieved = new RetrievedImage
@@ -136,7 +115,7 @@ public sealed partial class HtmlImageRetriever : IImageRetriever
                     SourceUrl = originalSourceUrl,
                     FinalSourceUrl = fetched.FinalSourceUrl,
                     FileSize = fetched.FileSize,
-                    Strategy = Name
+                    Strategy = "Html"
                 };
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

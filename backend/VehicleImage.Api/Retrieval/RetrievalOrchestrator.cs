@@ -1,7 +1,5 @@
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
-using VehicleImage.Api.Exceptions;
 using VehicleImage.Api.Models;
 
 namespace VehicleImage.Api.Retrieval;
@@ -24,22 +22,6 @@ public sealed class RetrievalOrchestrator
         _htmlRetriever = htmlRetriever;
     }
 
-    public async Task<RetrievalResult> RetrieveAsync(Uri source, CancellationToken cancellationToken = default)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        await foreach (var candidate in RetrieveCandidatesAsync(source, cancellationToken))
-        {
-            stopwatch.Stop();
-            return new RetrievalResult(
-                Image: candidate,
-                Strategy: candidate.Strategy,
-                AttemptedSources: [source, candidate.FinalSourceUrl],
-                Elapsed: stopwatch.Elapsed);
-        }
-
-        throw ImageIngestionException.NoImageFound();
-    }
-
     public async IAsyncEnumerable<RetrievedImage> RetrieveCandidatesAsync(
         Uri source,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -49,7 +31,7 @@ public sealed class RetrievalOrchestrator
         // Single initial GET — no mandatory HEAD request (Decision 4 & Section 9.2)
         var (initialFetch, charset) = await _directRetriever.FetchWithRetriesAsync(
             source,
-            _directRetriever.Name,
+            "Direct",
             cancellationToken);
 
         bool transferredOwnership = false;

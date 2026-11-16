@@ -250,19 +250,6 @@ public sealed class MockSupplierServer : IAsyncDisposable
         baseBomb[23] = 0x98; // 15000
         DecompressionBombPngBytes = baseBomb;
 
-        // Also persist physical fixture files under Fixtures/Images for inspection
-        string imagesDir = Path.Combine(ResolveFixturesRootDir(), "Images");
-        Directory.CreateDirectory(imagesDir);
-        await File.WriteAllBytesAsync(Path.Combine(imagesDir, "valid-car.jpg"), ValidJpegBytes);
-        await File.WriteAllBytesAsync(Path.Combine(imagesDir, "valid-car.png"), ValidPngBytes);
-        await File.WriteAllBytesAsync(Path.Combine(imagesDir, "valid-car.webp"), ValidWebPBytes);
-        await File.WriteAllBytesAsync(Path.Combine(imagesDir, "corrupted.jpg"), CorruptedJpegBytes);
-        await File.WriteAllBytesAsync(Path.Combine(imagesDir, "unsupported.gif"), UnsupportedGifBytes);
-        await File.WriteAllBytesAsync(Path.Combine(imagesDir, "unsupported.bmp"), UnsupportedBmpBytes);
-        await File.WriteAllBytesAsync(Path.Combine(imagesDir, "too-small.png"), TooSmallPngBytes);
-        await File.WriteAllBytesAsync(Path.Combine(imagesDir, "decompression-bomb.png"), DecompressionBombPngBytes);
-        await File.WriteAllTextAsync(Path.Combine(imagesDir, "vector.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"400\" height=\"300\"/>");
-        await File.WriteAllTextAsync(Path.Combine(imagesDir, "html-masquerade.jpg"), "<!DOCTYPE html><html><body>Not an image</body></html>");
     }
 
     private static async Task<byte[]> CreateImageBytesAsync(int width, int height, string format)

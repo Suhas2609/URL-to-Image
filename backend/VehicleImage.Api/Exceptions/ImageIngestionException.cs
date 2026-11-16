@@ -66,9 +66,6 @@ public sealed class ImageIngestionException : Exception
     public static ImageIngestionException HttpError(int statusCode)
         => new(ErrorCodes.HttpError, $"The supplier returned an unexpected status code (HTTP {statusCode}).", isTransient: false, upstreamStatusCode: statusCode);
 
-    public static ImageIngestionException UnsupportedSource(string detail = "The supplied source requires an unsupported retrieval mechanism.")
-        => new(ErrorCodes.UnsupportedSource, detail, isTransient: false);
-
     public static ImageIngestionException UnsupportedContentType(string detail = "The retrieved resource is not an image.")
         => new(ErrorCodes.UnsupportedContentType, detail, isTransient: false);
 
@@ -89,9 +86,6 @@ public sealed class ImageIngestionException : Exception
 
     public static ImageIngestionException NoImageFound(string detail = "No usable vehicle image candidate could be found on the supplied HTML page.")
         => new(ErrorCodes.NoImageFound, detail, isTransient: false);
-
-    public static ImageIngestionException ProviderAuthRequired(string detail = "Authorized access is required to retrieve this cloud provider resource.")
-        => new(ErrorCodes.ProviderAuthRequired, detail, isTransient: false);
 
     public static ImageIngestionException StorageFailed(string detail = "Failed to persist or read the image in internal storage.", Exception? inner = null)
         => new(ErrorCodes.StorageFailed, detail, isTransient: false, httpStatusCode: StatusCodes.Status500InternalServerError, innerException: inner);

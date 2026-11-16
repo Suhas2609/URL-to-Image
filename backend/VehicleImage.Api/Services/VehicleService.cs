@@ -79,6 +79,11 @@ public sealed class VehicleService : IVehicleService
             _dbContext.Vehicles.Add(vehicle);
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
+        catch (OperationCanceledException)
+        {
+            await CompensateFileDeleteAsync(ingested.StorageKey);
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(
@@ -126,6 +131,7 @@ public sealed class VehicleService : IVehicleService
         IngestedImage ingested = await _ingestionService.IngestAsync(request.ImageUrl, cancellationToken);
 
         // 5, 6, 8. Update the database reference in a transaction, conditional on the prior ImageId.
+        bool commitAttempted = false;
         try
         {
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
@@ -181,6 +187,7 @@ public sealed class VehicleService : IVehicleService
             _dbContext.VehicleImages.Add(newImage);
 
             await _dbContext.SaveChangesAsync(cancellationToken);
+            commitAttempted = true;
             await transaction.CommitAsync(cancellationToken);
         }
         catch (ResourceNotFoundException)
@@ -191,21 +198,37 @@ public sealed class VehicleService : IVehicleService
         {
             throw;
         }
+        catch (OperationCanceledException)
+        {
+            if (!commitAttempted)
+            {
+                await CompensateFileDeleteAsync(ingested.StorageKey);
+            }
+
+            throw;
+        }
         catch (DbUpdateConcurrencyException ex)
         {
             _logger.LogWarning(ex, "Concurrent update detected while replacing image for VehicleId={VehicleId}", vehicleId);
-            await CompensateFileDeleteAsync(ingested.StorageKey);
+            if (!commitAttempted)
+            {
+                await CompensateFileDeleteAsync(ingested.StorageKey);
+            }
+
             throw new ConcurrentUpdateException();
         }
         catch (Exception ex)
         {
             _logger.LogError(
                 ex,
-                "Database commit failed during image replacement for VehicleId={VehicleId}. Keeping old image and deleting new storage key {NewStorageKey}.",
+                "Database persistence failed during image replacement for VehicleId={VehicleId}. New storage key {NewStorageKey} is retained because commit outcome may be uncertain.",
                 vehicleId,
                 ingested.StorageKey);
 
-            await CompensateFileDeleteAsync(ingested.StorageKey);
+            if (!commitAttempted)
+            {
+                await CompensateFileDeleteAsync(ingested.StorageKey);
+            }
 
             throw ImageIngestionException.DatabasePersistenceFailed(
                 "Failed to update the vehicle image reference in the database.",

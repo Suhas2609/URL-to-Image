@@ -2,7 +2,6 @@ namespace VehicleImage.Api.Entities;
 
 public enum ImageStatus
 {
-    Processing,
     Completed,
     Failed
 }

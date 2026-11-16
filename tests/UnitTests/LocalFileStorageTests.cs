@@ -21,7 +21,7 @@ public class LocalFileStorageTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveOpenExistsDelete_ValidLifecycle_WorksCorrectly()
+    public async Task SaveOpenDelete_ValidLifecycle_WorksCorrectly()
     {
         byte[] payload = [1, 2, 3, 4, 5, 6, 7, 8];
         using var input = new MemoryStream(payload);
@@ -31,8 +31,6 @@ public class LocalFileStorageTests : IDisposable
         Assert.StartsWith("vehicles/", key);
         Assert.EndsWith(".jpg", key);
         Assert.DoesNotContain("\\", key);
-        Assert.True(await _storage.ExistsAsync(key));
-
         await using (Stream readStream = await _storage.OpenReadAsync(key))
         {
             using var copy = new MemoryStream();
@@ -41,7 +39,7 @@ public class LocalFileStorageTests : IDisposable
         }
 
         await _storage.DeleteAsync(key);
-        Assert.False(await _storage.ExistsAsync(key));
+        await Assert.ThrowsAsync<FileNotFoundException>(() => _storage.OpenReadAsync(key));
 
         // Second delete is idempotent
         await _storage.DeleteAsync(key);

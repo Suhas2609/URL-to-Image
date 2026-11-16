@@ -9,7 +9,7 @@ using VehicleImage.Api.Security;
 
 namespace VehicleImage.Api.Retrieval;
 
-public sealed class DirectImageRetriever : IImageRetriever
+public sealed class DirectImageRetriever
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly UrlValidator _urlValidator;
@@ -32,14 +32,6 @@ public sealed class DirectImageRetriever : IImageRetriever
         _retrievalOptions = retrievalOptions.Value;
         _retryOptions = retryOptions.Value;
         _logger = logger;
-    }
-
-    public string Name => "Direct";
-
-    public async Task<RetrievedImage> RetrieveAsync(Uri source, CancellationToken cancellationToken = default)
-    {
-        var (image, _) = await FetchWithRetriesAsync(source, Name, cancellationToken);
-        return image;
     }
 
     internal async Task<(RetrievedImage Image, string? Charset)> FetchWithRetriesAsync(

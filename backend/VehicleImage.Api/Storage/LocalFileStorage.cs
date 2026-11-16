@@ -33,8 +33,6 @@ public sealed class LocalFileStorage : IImageStorage
             : _rootPath + Path.DirectorySeparatorChar;
     }
 
-    public string RootPath => _rootPath;
-
     public async Task<string> SaveAsync(
         Stream image,
         string fileExtension,
@@ -153,13 +151,6 @@ public sealed class LocalFileStorage : IImageStorage
             _logger.LogError(ex, "Failed to delete stored image for key {StorageKey}", storageKey);
             throw ImageIngestionException.StorageFailed("Failed to delete image from storage.", ex);
         }
-    }
-
-    public Task<bool> ExistsAsync(string storageKey, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        string fullPath = ResolveSafeFullPath(storageKey);
-        return Task.FromResult(File.Exists(fullPath));
     }
 
     public string ResolveSafeFullPath(string storageKey)

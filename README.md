@@ -65,7 +65,7 @@ VehicleImageSystem/
 │       ├── Data/                # ApplicationDbContext & EF entity configurations
 │       ├── Migrations/          # EF Core SQL Server migrations (InitialCreate)
 │       ├── Services/            # VehicleService, ImageIngestionService, ImageDeliveryService
-│       ├── Retrieval/           # IImageRetriever, RetrievalOrchestrator, Direct & Html retrievers
+│       ├── Retrieval/           # RetrievalOrchestrator, Direct & Html retrievers
 │       ├── Security/            # UrlValidator, DestinationValidator, SsrfGuardHttpHandler
 │       ├── ImageProcessing/     # ImageValidator & ImageMetadata
 │       ├── Storage/             # IImageStorage & LocalFileStorage (outside wwwroot)
@@ -130,7 +130,9 @@ npm install
 npm run dev
 ```
 
-The Vite dev server runs at `http://localhost:5173` and proxies `/api` requests to the ASP.NET Core backend (`http://localhost:5085` by default, configurable via `VITE_API_TARGET`).
+The Vite dev server runs at `http://localhost:5173` and proxies `/api` requests to the ASP.NET Core backend (`http://localhost:5080` by default, configurable via `VITE_API_TARGET`).
+
+The API currently has no authentication or authorization. Do not expose it publicly without adding appropriate access controls.
 
 ### 4. Run the Test Suites
 
@@ -139,6 +141,8 @@ All unit, integration, and SSRF security tests run against an in-process Kestrel
 ```bash
 dotnet test
 ```
+
+Integration tests use isolated SQLite databases and temporary storage directories. SQL Server remains the default application provider; SQLite `EnsureCreated()` is used only for isolated test databases.
 
 ---
 

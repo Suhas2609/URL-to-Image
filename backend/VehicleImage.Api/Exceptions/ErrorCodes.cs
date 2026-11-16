@@ -16,7 +16,6 @@ public static class ErrorCodes
     public const string HttpRateLimited = "HTTP_RATE_LIMITED";
     public const string HttpServerError = "HTTP_SERVER_ERROR";
     public const string HttpError = "HTTP_ERROR";
-    public const string UnsupportedSource = "UNSUPPORTED_SOURCE";
     public const string UnsupportedContentType = "UNSUPPORTED_CONTENT_TYPE";
     public const string UnsupportedImageFormat = "UNSUPPORTED_IMAGE_FORMAT";
     public const string ImageTooLarge = "IMAGE_TOO_LARGE";
@@ -24,7 +23,6 @@ public static class ErrorCodes
     public const string ImageTooSmall = "IMAGE_TOO_SMALL";
     public const string ImageDecodeFailed = "IMAGE_DECODE_FAILED";
     public const string NoImageFound = "NO_IMAGE_FOUND";
-    public const string ProviderAuthRequired = "PROVIDER_AUTH_REQUIRED";
     public const string StorageFailed = "STORAGE_FAILED";
     public const string DatabasePersistenceFailed = "DATABASE_PERSISTENCE_FAILED";
     public const string VehicleNotFound = "VEHICLE_NOT_FOUND";
