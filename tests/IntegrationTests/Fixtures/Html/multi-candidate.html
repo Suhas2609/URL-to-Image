@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>2026 Audi RS6 Avant</title>
+    <!-- Candidate 1 is og:image, but it points to a tiny 60x60 thumbnail that fails ImageValidator -->
+    <meta property="og:image" content="/fixtures/images/too-small.png" />
+</head>
+<body>
+    <header class="site-header">
+        <img src="/fixtures/images/site-logo.png" alt="Site Logo" width="180" height="50" />
+    </header>
+    <main class="vehicle-listing">
+        <img src="/fixtures/images/tracking-pixel.gif" width="1" height="1" alt="" />
+        <!-- Candidate 2 is the real vehicle hero image and passes ImageValidator -->
+        <img class="vehicle-hero-photo" src="/fixtures/images/valid-car.png" width="640" height="400" alt="2026 Audi RS6 Avant exterior" />
+    </main>
+    <footer>
+        <img src="/fixtures/images/ad-banner.jpg" alt="Sponsor ad" />
+    </footer>
+</body>
+</html>

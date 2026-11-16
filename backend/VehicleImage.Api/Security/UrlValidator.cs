@@ -1,0 +1,145 @@
+using System.Globalization;
+using System.Net;
+using Microsoft.Extensions.Options;
+using VehicleImage.Api.Configuration;
+using VehicleImage.Api.Exceptions;
+
+namespace VehicleImage.Api.Security;
+
+public sealed class UrlValidator
+{
+    private readonly RetrievalOptions _options;
+    private readonly DestinationValidator _destinationValidator;
+    private static readonly IdnMapping Idn = new();
+
+    public UrlValidator(IOptions<RetrievalOptions> options, DestinationValidator destinationValidator)
+    {
+        _options = options.Value;
+        _destinationValidator = destinationValidator;
+    }
+
+    public Uri Validate(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            throw ImageIngestionException.InvalidUrl("The image URL is required.");
+        }
+
+        string trimmed = raw.Trim();
+        if (trimmed.Length > _options.MaxUrlLength)
+        {
+            throw ImageIngestionException.InvalidUrl($"The URL exceeds the maximum length of {_options.MaxUrlLength} characters.");
+        }
+
+        foreach (char c in trimmed)
+        {
+            if (char.IsControl(c))
+            {
+                throw ImageIngestionException.InvalidUrl("The URL contains invalid control characters.");
+            }
+        }
+
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            throw ImageIngestionException.InvalidUrl("The URL must be a valid absolute URI.");
+        }
+
+        return ValidateUriPolicy(uri);
+    }
+
+    public Uri ValidateRedirectTarget(Uri currentUri, string? locationHeader)
+    {
+        ArgumentNullException.ThrowIfNull(currentUri);
+
+        if (string.IsNullOrWhiteSpace(locationHeader))
+        {
+            throw ImageIngestionException.InvalidUrl("Redirect response did not include a valid Location header.");
+        }
+
+        string trimmed = locationHeader.Trim();
+        if (trimmed.Length > _options.MaxUrlLength)
+        {
+            throw ImageIngestionException.InvalidUrl($"Redirect target URL exceeds the maximum length of {_options.MaxUrlLength} characters.");
+        }
+
+        foreach (char c in trimmed)
+        {
+            if (char.IsControl(c))
+            {
+                throw ImageIngestionException.InvalidUrl("Redirect target URL contains invalid control characters.");
+            }
+        }
+
+        if (!Uri.TryCreate(currentUri, trimmed, out var targetUri))
+        {
+            throw ImageIngestionException.InvalidUrl("Redirect target URL could not be resolved.");
+        }
+
+        return ValidateUriPolicy(targetUri);
+    }
+
+    private Uri ValidateUriPolicy(Uri uri)
+    {
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw ImageIngestionException.InvalidUrl("Only HTTP and HTTPS URLs are permitted.");
+        }
+
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+        {
+            throw ImageIngestionException.InvalidUrl("URLs containing embedded credentials (userinfo) are not permitted.");
+        }
+
+        if (string.IsNullOrWhiteSpace(uri.Host))
+        {
+            throw ImageIngestionException.InvalidUrl("The URL must specify a valid host.");
+        }
+
+        if (!_destinationValidator.IsPortAllowed(uri.Port, _options.AllowedPorts))
+        {
+            throw ImageIngestionException.UnsafeDestination($"Port {uri.Port} is not permitted.");
+        }
+
+        if (!_destinationValidator.IsHostNameAllowed(uri.DnsSafeHost))
+        {
+            throw ImageIngestionException.UnsafeDestination();
+        }
+
+        if (uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6)
+        {
+            if (!IPAddress.TryParse(uri.DnsSafeHost, out var ipAddress))
+            {
+                throw ImageIngestionException.InvalidUrl("The IP literal in the URL is malformed.");
+            }
+
+            if (ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && ipAddress.ScopeId != 0)
+            {
+                throw ImageIngestionException.UnsafeDestination();
+            }
+
+            if (!_destinationValidator.IsAllowed(ipAddress))
+            {
+                throw ImageIngestionException.UnsafeDestination();
+            }
+
+            return uri;
+        }
+
+        // Normalize IDN hostnames and ensure basic hostname validity
+        try
+        {
+            string asciiHost = Idn.GetAscii(uri.DnsSafeHost);
+            if (string.IsNullOrWhiteSpace(asciiHost) || !asciiHost.Contains('.'))
+            {
+                throw ImageIngestionException.InvalidUrl("The URL hostname must be a valid fully qualified domain name.");
+            }
+        }
+        catch (ArgumentException)
+        {
+            throw ImageIngestionException.InvalidUrl("The URL hostname could not be normalized.");
+        }
+
+        return uri;
+    }
+}

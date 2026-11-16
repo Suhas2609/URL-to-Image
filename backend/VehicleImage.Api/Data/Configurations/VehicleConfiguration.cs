@@ -1,4 +1,3 @@
-
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using VehicleImage.Api.Entities;
@@ -10,37 +9,39 @@ public class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
 {
     public void Configure(EntityTypeBuilder<Vehicle> builder)
     {
-        // Table configuration
-        builder.ToTable("Vehicles");
+        builder.ToTable("Vehicles", t =>
+        {
+            t.HasCheckConstraint("CK_Vehicles_Year", "[Year] >= 1886 AND [Year] <= 2100");
+        });
 
-        // Primary key
         builder.HasKey(v => v.Id);
 
-        // Required properties
         builder.Property(v => v.Make)
-            .IsRequired();
+            .IsRequired()
+            .HasMaxLength(100);
 
         builder.Property(v => v.Model)
-            .IsRequired();
+            .IsRequired()
+            .HasMaxLength(100);
 
         builder.Property(v => v.Variant)
-            .IsRequired();
+            .IsRequired(false)
+            .HasMaxLength(150);
 
         builder.Property(v => v.Year)
             .IsRequired();
 
-        // Timestamps
         builder.Property(v => v.CreatedAt)
-            .IsRequired();
+            .IsRequired()
+            .HasDefaultValueSql("SYSUTCDATETIME()");
 
         builder.Property(v => v.UpdatedAt)
-            .IsRequired();
+            .IsRequired()
+            .HasDefaultValueSql("SYSUTCDATETIME()");
 
-        // One-to-one relationship with VehicleImage
-        builder.HasOne(v => v.VehicleImage)
+        builder.HasOne(v => v.Image)
             .WithOne(image => image.Vehicle)
-            .HasForeignKey<VehicleImageEntity>(
-                image => image.VehicleId
-            );
+            .HasForeignKey<VehicleImageEntity>(image => image.VehicleId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
