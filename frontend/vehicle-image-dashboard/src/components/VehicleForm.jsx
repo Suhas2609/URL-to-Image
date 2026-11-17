@@ -21,6 +21,15 @@ const DEMO_PRESETS = [
     imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/39/2021_BMW_M3_Competition_Automatic_3.0_Front.jpg/960px-2021_BMW_M3_Competition_Automatic_3.0_Front.jpg'
   },
   {
+    id: 'preset-vehicle-d',
+    label: 'Vehicle D: Google Drive Link',
+    make: 'Honda',
+    model: 'Civic',
+    variant: 'Public Drive Image',
+    year: 2026,
+    imageUrl: 'https://drive.google.com/file/d/1Y7xhUt-X-Frjt-gHtPXt7BEQL5101O7e/view?usp=sharing'
+  },
+  {
     id: 'preset-vehicle-c',
     label: 'Vehicle C: SSRF / Blocked URL',
     make: 'Audi',
@@ -190,7 +199,7 @@ export default function VehicleForm({ onVehicleCreated }) {
 
         <div className="field-group">
           <label className="field-label" htmlFor="vehicle-image-url">
-            Supplier Image or Webpage URL
+            Supplier Image, Webpage, or Google Drive URL
           </label>
           <input
             id="vehicle-image-url"
@@ -198,7 +207,7 @@ export default function VehicleForm({ onVehicleCreated }) {
             required
             maxLength={2048}
             className="field-input field-input-mono"
-            placeholder="https://supplier.example.com/listing-or-image"
+            placeholder="https://drive.google.com/file/d/... or https://supplier.example.com/image.jpg"
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
             disabled={submitting}

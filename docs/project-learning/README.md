@@ -19,6 +19,7 @@
 | **4** | [`04-complete-source-code-frontend.md`](./04-complete-source-code-frontend.md) | Verbatim, unabbreviated source code of all 14 frontend files (`index.html`, Vite config, API client, React pages/components, CSS) |
 | **5** | [`05-interview-code-defence-question-bank.md`](./05-interview-code-defence-question-bank.md) | 14-category interview question bank (60+ repo-grounded Q&As including deep-dive code-defense scenarios) with interviewer intent, answers, file/method anchors, follow-ups, and pitfalls |
 | **6** | [`06-step-by-step-learning-roadmap.md`](./06-step-by-step-learning-roadmap.md) | 7-day structured study plan prioritizing backend pipeline → security & validation → storage & DB → CSV bulk import → frontend → mock defense |
+| **7** | [`07-google-drive-image-retrieval-service-and-flow.md`](./07-google-drive-image-retrieval-service-and-flow.md) | Complete deep dive on Google Drive public image retrieval: problem statement, component design, sequence diagrams, URL translation regex, interstitial handling, security controls, and defense Q&A |
 
 ---
 
