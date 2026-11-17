@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import VehicleForm from '../components/VehicleForm';
+import BulkImportForm from '../components/BulkImportForm';
 import VehicleCard from '../components/VehicleCard';
 import { listVehicles } from '../services/vehicleApi';
 
@@ -33,14 +34,20 @@ export default function DashboardPage() {
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
+  function handleCatalogRefreshFromPageOne() {
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      fetchCatalog(1);
+    }
+  }
+
   return (
     <main className="dashboard-container">
-      <VehicleForm
-        onVehicleCreated={() => {
-          setPage(1);
-          fetchCatalog(1);
-        }}
-      />
+      <div className="sidebar-stack">
+        <VehicleForm onVehicleCreated={handleCatalogRefreshFromPageOne} />
+        <BulkImportForm onImportCompleted={handleCatalogRefreshFromPageOne} />
+      </div>
 
       <section aria-labelledby="catalog-heading" aria-busy={loading}>
         <div className="catalog-header">

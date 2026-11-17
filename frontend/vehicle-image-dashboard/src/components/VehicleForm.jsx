@@ -91,7 +91,7 @@ export default function VehicleForm({ onVehicleCreated }) {
   }
 
   return (
-    <aside className="panel panel-sticky" aria-labelledby="ingest-form-heading">
+    <aside className="panel" aria-labelledby="ingest-form-heading">
       <h2 id="ingest-form-heading" className="panel-title">
         Submit Supplier Vehicle &amp; Image URL
       </h2>

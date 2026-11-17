@@ -110,6 +110,19 @@ export async function replaceImage(vehicleId, imageUrl) {
   });
 }
 
+export async function importVehiclesCsv(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  return request(`${API_BASE}/api/vehicles/import`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json'
+    },
+    body: formData
+  });
+}
+
 export function resolveInternalImageUrl(imageUrl) {
   if (!imageUrl) return null;
   return `${API_BASE}${imageUrl}`;

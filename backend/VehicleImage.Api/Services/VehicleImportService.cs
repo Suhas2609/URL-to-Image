@@ -187,7 +187,7 @@ public sealed class VehicleImportService : IVehicleImportService
         {
             throw new ValidationException(
                 $"The CSV header is missing required column(s): {string.Join(", ", missing.Select(DisplayName))}. " +
-                "Expected columns: Make, Model, Variant, Year, ImageUrl.");
+                "Required columns: Make, Model, Year, ImageUrl (Variant is optional).");
         }
 
         return columns;
@@ -296,18 +296,15 @@ public sealed class VehicleImportService : IVehicleImportService
 
             return Failed(row, ex.Code, ex.Message);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException && LogUnexpectedFailure(ex, row.RowNumber))
+        catch (OperationCanceledException)
         {
-            // Never reached: the filter logs and returns false so unexpected exceptions propagate
-            // to GlobalExceptionHandler instead of being swallowed.
             throw;
         }
-    }
-
-    private bool LogUnexpectedFailure(Exception ex, int rowNumber)
-    {
-        _logger.LogError(ex, "Unexpected failure while importing CSV row {Row}; aborting the import.", rowNumber);
-        return false;
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected failure while importing CSV row {Row}; aborting the import.", row.RowNumber);
+            throw;
+        }
     }
 
     private static VehicleImportRowResult Failed(CsvRow row, string code, string errorMessage) =>
