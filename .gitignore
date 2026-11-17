@@ -38,6 +38,13 @@ storage/**
 !storage/vehicles/.gitkeep
 backend/VehicleImage.Api/storage/**
 
+# Database files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
 # Test results
 TestResults/
 coverage/

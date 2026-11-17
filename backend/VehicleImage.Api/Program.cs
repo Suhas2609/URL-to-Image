@@ -47,6 +47,11 @@ builder.Services.AddOptions<RetryOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+builder.Services.AddOptions<BulkImportOptions>()
+    .Bind(builder.Configuration.GetSection(BulkImportOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
 // 2. Database registration (SQL Server primary; supports Sqlite provider when configured for local non-Windows/test runs)
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
@@ -128,6 +133,7 @@ builder.Services.AddScoped<ImageDeliveryService>();
 builder.Services.AddScoped<IImageDeliveryService>(sp => sp.GetRequiredService<ImageDeliveryService>());
 builder.Services.AddScoped<VehicleService>();
 builder.Services.AddScoped<IVehicleService>(sp => sp.GetRequiredService<VehicleService>());
+builder.Services.AddScoped<IVehicleImportService, VehicleImportService>();
 
 // 6. CORS for React Vite dashboard and health checks
 builder.Services.AddCors(options =>

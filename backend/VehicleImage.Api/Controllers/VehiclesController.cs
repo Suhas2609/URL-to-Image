@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
+using VehicleImage.Api.Configuration;
 using VehicleImage.Api.DTOs;
 using VehicleImage.Api.DTOs.Vehicles;
 using VehicleImage.Api.Services;
@@ -10,11 +11,16 @@ namespace VehicleImage.Api.Controllers;
 [Route("api/vehicles")]
 public sealed class VehiclesController : ControllerBase
 {
-    private readonly IVehicleService _vehicleService;
+    // Multipart framing overhead allowed on top of the largest permitted CSV file.
+    private const long ImportRequestSizeLimit = BulkImportOptions.AbsoluteMaxFileBytes + 64 * 1024;
 
-    public VehiclesController(IVehicleService vehicleService)
+    private readonly IVehicleService _vehicleService;
+    private readonly IVehicleImportService _importService;
+
+    public VehiclesController(IVehicleService vehicleService, IVehicleImportService importService)
     {
         _vehicleService = vehicleService;
+        _importService = importService;
     }
 
     [HttpPost]
@@ -27,6 +33,26 @@ public sealed class VehiclesController : ControllerBase
     {
         ImageSubmissionResponse result = await _vehicleService.CreateAsync(request, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = result.VehicleId }, result);
+    }
+
+    /// <summary>
+    /// Imports vehicles from a CSV file (columns: Make, Model, Variant, Year, ImageUrl).
+    /// Returns 200 with a per-record result even when some records fail; returns 400 when the
+    /// file itself is invalid (missing columns, malformed CSV, too many records, empty file).
+    /// </summary>
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(ImportRequestSizeLimit)]
+    [RequestFormLimits(MultipartBodyLengthLimit = ImportRequestSizeLimit)]
+    [ProducesResponseType(typeof(VehicleImportResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(DTOs.Images.ImageFailureResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status415UnsupportedMediaType)]
+    public async Task<ActionResult<VehicleImportResponse>> Import(
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        VehicleImportResponse result = await _importService.ImportCsvAsync(file, cancellationToken);
+        return Ok(result);
     }
 
     [HttpGet]
