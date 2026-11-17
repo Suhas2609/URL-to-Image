@@ -1,6 +1,6 @@
 # Interview & Code-Defence Question Bank
 
-This bank contains **56 deep, repository-grounded interview questions** organized across **14 topic categories**. Every question uses a 6-part structure anchored directly to exact files, classes, methods, and behaviors on branch `feature/csv-bulk-import` (`49e9d84`).
+This bank contains **56 deep, repository-grounded interview questions** organized across **14 topic categories**. Every question uses a 6-part structure anchored directly to exact files, classes, methods, and behaviors on branch `feature/google-drive-image-retrieval` (built upon `feature/csv-bulk-import` and `main`).
 
 ---
 

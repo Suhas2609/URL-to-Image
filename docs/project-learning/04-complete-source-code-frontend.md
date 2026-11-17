@@ -136,7 +136,7 @@ import DashboardPage from './pages/DashboardPage';
 
 export default function App() {
   return (
-    <div>
+    <div className="app-shell">
       <header className="app-header">
         <div className="app-header-inner">
           <div className="brand-group">
@@ -348,12 +348,29 @@ export default function DashboardPage() {
 
   return (
     <main className="dashboard-container">
-      <div className="sidebar-stack">
-        <VehicleForm onVehicleCreated={handleCatalogRefreshFromPageOne} />
-        <BulkImportForm onImportCompleted={handleCatalogRefreshFromPageOne} />
-      </div>
+      <aside className="sidebar-static-section" aria-label="Vehicle Ingestion Controls">
+        <div className="sidebar-window-header">
+          <div className="window-dots" aria-hidden="true" title="Static Ingestion Pane">
+            <span className="window-dot window-dot-red" />
+            <span className="window-dot window-dot-yellow" />
+            <span className="window-dot window-dot-green" />
+          </div>
+          <span className="sidebar-window-title">Ingestion Controls</span>
+          <div className="sidebar-window-actions" aria-hidden="true" title="Static Section Indicator">
+            <span className="action-dot" />
+            <span className="action-dot" />
+            <span className="action-dot" />
+          </div>
+        </div>
+        <div className="sidebar-scrollable-content">
+          <div className="sidebar-stack">
+            <VehicleForm onVehicleCreated={handleCatalogRefreshFromPageOne} />
+            <BulkImportForm onImportCompleted={handleCatalogRefreshFromPageOne} />
+          </div>
+        </div>
+      </aside>
 
-      <section aria-labelledby="catalog-heading" aria-busy={loading}>
+      <section className="catalog-section" aria-labelledby="catalog-heading" aria-busy={loading}>
         <div className="catalog-header">
           <div className="catalog-title-group">
             <h2 id="catalog-heading">Internally Stored Vehicle Catalog</h2>
@@ -538,7 +555,7 @@ export default function VehicleForm({ onVehicleCreated }) {
   }
 
   return (
-    <aside className="panel" aria-labelledby="ingest-form-heading">
+    <section className="panel" aria-labelledby="ingest-form-heading">
       <h2 id="ingest-form-heading" className="panel-title">
         Submit Supplier Vehicle &amp; Image URL
       </h2>
@@ -676,7 +693,7 @@ export default function VehicleForm({ onVehicleCreated }) {
           {feedback.traceId && <div className="feedback-meta">Trace ID: {feedback.traceId}</div>}
         </div>
       )}
-    </aside>
+    </section>
   );
 }
 ```
@@ -1299,7 +1316,9 @@ export default function ImagePlaceholder({ reason }) {
   box-sizing: border-box;
 }
 
+html,
 body {
+  height: 100%;
   margin: 0;
   font-family: var(--font-sans);
   background-color: var(--bg-canvas);
@@ -1308,8 +1327,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+@media (min-width: 1025px) {
+  html,
+  body {
+    overflow: hidden;
+  }
+
+  .app-shell {
+    height: 100vh;
+    overflow: hidden;
+  }
+}
+
 /* Header & Layout */
 .app-header {
+  flex-shrink: 0;
   background-color: var(--bg-surface);
   border-bottom: 1px solid var(--border-subtle);
   position: sticky;
@@ -1318,7 +1356,7 @@ body {
 }
 
 .app-header-inner {
-  max-width: 1320px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 1rem 1.5rem;
   display: flex;
@@ -1367,18 +1405,33 @@ body {
 }
 
 .dashboard-container {
-  max-width: 1320px;
+  max-width: 1400px;
+  width: 100%;
   margin: 0 auto;
-  padding: 1.75rem 1.5rem 3.5rem;
+  padding: 1.5rem 1.5rem 2rem;
   display: grid;
-  grid-template-columns: 390px 1fr;
-  gap: 2rem;
-  align-items: start;
+  grid-template-columns: 410px 1fr;
+  gap: 1.75rem;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+@media (min-width: 1025px) {
+  .dashboard-container {
+    height: calc(100vh - 74px);
+    overflow: hidden;
+    padding: 1.25rem 1.5rem 1.25rem;
+  }
 }
 
 @media (max-width: 1024px) {
   .dashboard-container {
     grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+    padding: 1.25rem 1rem 3rem;
   }
 }
 
@@ -1630,7 +1683,48 @@ body {
   border: 1px solid var(--status-danger-border);
 }
 
-/* Catalog Section & Grid */
+/* Catalog Section (Scrollable Dashboard Area) */
+.catalog-section {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 1025px) {
+  .catalog-section {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 0.5rem;
+    padding-bottom: 2.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  .catalog-section::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .catalog-section::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .catalog-section::-webkit-scrollbar-thumb {
+    background-color: var(--border-strong);
+    border-radius: 999px;
+  }
+
+  .catalog-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: var(--bg-canvas);
+    padding-top: 0.25rem;
+    padding-bottom: 0.85rem;
+    margin-bottom: 0.85rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+}
+
 .catalog-header {
   display: flex;
   align-items: center;
@@ -1856,11 +1950,132 @@ body {
   font-size: 0.84rem;
 }
 
+/* Sidebar Static Section with Window Header (Three Dots) */
+.sidebar-static-section {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+@media (min-width: 1025px) {
+  .sidebar-static-section {
+    height: 100%;
+    min-height: 0;
+  }
+}
+
+.sidebar-window-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 1rem;
+  background: linear-gradient(180deg, hsl(215, 28%, 98%) 0%, hsl(214, 24%, 95%) 100%);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.window-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.window-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.window-dot-red {
+  background-color: #ff5f56;
+  border: 1px solid #e0443e;
+}
+
+.window-dot-yellow {
+  background-color: #ffbd2e;
+  border: 1px solid #dea123;
+}
+
+.window-dot-green {
+  background-color: #27c93f;
+  border: 1px solid #1aab29;
+}
+
+.window-dots:hover .window-dot {
+  transform: scale(1.08);
+}
+
+.sidebar-window-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.sidebar-window-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+}
+
+.action-dot {
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 50%;
+  background-color: var(--text-muted);
+  display: inline-block;
+  opacity: 0.75;
+}
+
+.sidebar-scrollable-content {
+  background-color: var(--bg-canvas);
+  padding: 1rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+@media (min-width: 1025px) {
+  .sidebar-scrollable-content {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
+.sidebar-scrollable-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scrollable-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scrollable-content::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 999px;
+}
+
+.sidebar-static-section .panel {
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  padding: 1.25rem;
+}
+
 /* Sidebar Stack & CSV Bulk Import */
 .sidebar-stack {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 
 .bulk-header-row {
@@ -2035,4 +2250,3 @@ body {
   color: var(--status-danger-text);
 }
 ```
-

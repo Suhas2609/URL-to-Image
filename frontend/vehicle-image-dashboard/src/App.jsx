@@ -3,7 +3,7 @@ import DashboardPage from './pages/DashboardPage';
 
 export default function App() {
   return (
-    <div>
+    <div className="app-shell">
       <header className="app-header">
         <div className="app-header-inner">
           <div className="brand-group">

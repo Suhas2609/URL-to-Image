@@ -44,12 +44,29 @@ export default function DashboardPage() {
 
   return (
     <main className="dashboard-container">
-      <div className="sidebar-stack">
-        <VehicleForm onVehicleCreated={handleCatalogRefreshFromPageOne} />
-        <BulkImportForm onImportCompleted={handleCatalogRefreshFromPageOne} />
-      </div>
+      <aside className="sidebar-static-section" aria-label="Vehicle Ingestion Controls">
+        <div className="sidebar-window-header">
+          <div className="window-dots" aria-hidden="true" title="Static Ingestion Pane">
+            <span className="window-dot window-dot-red" />
+            <span className="window-dot window-dot-yellow" />
+            <span className="window-dot window-dot-green" />
+          </div>
+          <span className="sidebar-window-title">Ingestion Controls</span>
+          <div className="sidebar-window-actions" aria-hidden="true" title="Static Section Indicator">
+            <span className="action-dot" />
+            <span className="action-dot" />
+            <span className="action-dot" />
+          </div>
+        </div>
+        <div className="sidebar-scrollable-content">
+          <div className="sidebar-stack">
+            <VehicleForm onVehicleCreated={handleCatalogRefreshFromPageOne} />
+            <BulkImportForm onImportCompleted={handleCatalogRefreshFromPageOne} />
+          </div>
+        </div>
+      </aside>
 
-      <section aria-labelledby="catalog-heading" aria-busy={loading}>
+      <section className="catalog-section" aria-labelledby="catalog-heading" aria-busy={loading}>
         <div className="catalog-header">
           <div className="catalog-title-group">
             <h2 id="catalog-heading">Internally Stored Vehicle Catalog</h2>

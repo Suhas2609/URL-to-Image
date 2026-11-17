@@ -1,6 +1,6 @@
 # Step-by-Step Learning Roadmap (7-Day Mastery Plan)
 
-This structured study plan takes you from startup wiring through URL policy validation, binary image validation, transactional database persistence, CSV bulk ingestion, and the React dashboard so you can explain, modify, debug, and defend the entire `URL-to-Image` codebase independently.
+This structured study plan takes you from startup wiring through URL policy validation, binary image validation, transactional database persistence, CSV bulk ingestion, Google Drive image retrieval, and the React dashboard so you can explain, modify, debug, and defend the entire `URL-to-Image` (`feature/google-drive-image-retrieval`) codebase independently.
 
 ---
 

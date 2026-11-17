@@ -1,6 +1,6 @@
 # Complete Project Directory & File Reference
 
-This document maps every directory and file in `Suhas2609/URL-to-Image` on branch `feature/csv-bulk-import` (`49e9d84`), separates runtime source from tests, configuration, existing docs, and generated artifacts, compares `main` (`252579c`) against `feature/csv-bulk-import` (`49e9d84`), and explains each file's role in dependency order.
+This document maps every directory and file in `Suhas2609/URL-to-Image` on branch `feature/google-drive-image-retrieval` (incorporating CSV bulk import and Google Drive image retrieval), separates runtime source from tests, configuration, existing docs, and generated artifacts, compares `main` against feature branches, and explains each file's role in dependency order.
 
 ---
 

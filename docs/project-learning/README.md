@@ -1,11 +1,11 @@
 # VehicleImageSystem (`URL-to-Image`) — Complete Project Learning & Technical Reference Suite
 
-**Repository:** `Suhas2609/URL-to-Image`  
-**Documented Branch:** `feature/csv-bulk-import` (commit `49e9d84`, two commits ahead of `main` at `252579c`)  
-**Stack:** ASP.NET Core 10 Web API (`VehicleImage.Api`) · Entity Framework Core 10 (SQL Server primary, SQLite supported) · `SixLabors.ImageSharp` · `HtmlAgilityPack` · `CsvHelper` · React 19 + Vite 6  
+**Repository:** `Suhas2609/URL-to-Image`
+**Documented Branch:** `feature/google-drive-image-retrieval` (built upon `feature/csv-bulk-import` and `main`)
+**Stack:** ASP.NET Core 10 Web API (`VehicleImage.Api`) · Entity Framework Core 10 (SQL Server primary, SQLite supported) · `SixLabors.ImageSharp` · `HtmlAgilityPack` · `CsvHelper` · React 19 + Vite 6
 
 > [!IMPORTANT]
-> **Source-of-Truth Guarantee:** Every architecture claim, file path, class name, method signature, error code, configuration key, and source snippet in this learning suite was verified directly against the checked-out `feature/csv-bulk-import` tree. Intentional limitations and behaviors (such as the absence of authentication, synchronous execution without a background job queue, and why JS-rendered / Akamai-protected URLs like `magnific.com` return `NO_IMAGE_FOUND`) are documented explicitly rather than glossed over.
+> **Source-of-Truth Guarantee:** Every architecture claim, file path, class name, method signature, error code, configuration key, and source snippet in this learning suite was verified directly against the checked-out `feature/google-drive-image-retrieval` tree. Intentional limitations and behaviors (such as the absence of authentication, synchronous execution without a background job queue, and why JS-rendered / Akamai-protected URLs like `magnific.com` return `NO_IMAGE_FOUND`) are documented explicitly rather than glossed over.
 
 ---
 
@@ -14,11 +14,11 @@
 | Order | Document | Purpose |
 | :--- | :--- | :--- |
 | **1** | [`01-complete-architecture-and-learning-guide.md`](./01-complete-architecture-and-learning-guide.md) | 15 sequential learning modules (startup to React UI), 20 Mermaid architecture/sequence/ER diagrams with written walkthroughs, and 32+ end-to-end execution scenarios |
-| **2** | [`02-complete-project-directory-and-file-reference.md`](./02-complete-project-directory-and-file-reference.md) | Clean repository tree (excluding generated/runtime artifacts), `main` vs `feature/csv-bulk-import` diff table, and file-by-file breakdown in dependency order |
+| **2** | [`02-complete-project-directory-and-file-reference.md`](./02-complete-project-directory-and-file-reference.md) | Clean repository tree (excluding generated/runtime artifacts), `main` vs `feature/csv-bulk-import` vs `feature/google-drive-image-retrieval` diff table, and file-by-file breakdown in dependency order |
 | **3** | [`03-complete-source-code-backend.md`](./03-complete-source-code-backend.md) | Verbatim, unabbreviated source code of every runtime backend file with purpose notes before each block |
 | **4** | [`04-complete-source-code-frontend.md`](./04-complete-source-code-frontend.md) | Verbatim, unabbreviated source code of all 14 frontend files (`index.html`, Vite config, API client, React pages/components, CSS) |
 | **5** | [`05-interview-code-defence-question-bank.md`](./05-interview-code-defence-question-bank.md) | 14-category interview question bank (60+ repo-grounded Q&As including deep-dive code-defense scenarios) with interviewer intent, answers, file/method anchors, follow-ups, and pitfalls |
-| **6** | [`06-step-by-step-learning-roadmap.md`](./06-step-by-step-learning-roadmap.md) | 7-day structured study plan prioritizing backend pipeline → security & validation → storage & DB → CSV bulk import → frontend → mock defense |
+| **6** | [`06-step-by-step-learning-roadmap.md`](./06-step-by-step-learning-roadmap.md) | 7-day structured study plan prioritizing backend pipeline → security & validation → storage & DB → CSV bulk import → Google Drive retrieval → frontend → mock defense |
 | **7** | [`07-google-drive-image-retrieval-service-and-flow.md`](./07-google-drive-image-retrieval-service-and-flow.md) | Complete deep dive on Google Drive public image retrieval: problem statement, component design, sequence diagrams, URL translation regex, interstitial handling, security controls, and defense Q&A |
 
 ---
@@ -51,15 +51,36 @@ Every single submission, image replacement, and CSV bulk-import row executes the
 
 ## 3. What Was Added on `feature/csv-bulk-import`
 
-Compared to `main` (`252579c`), the current branch adds end-to-end CSV bulk vehicle ingestion while preserving every guarantee of the core pipeline:
+Compared to `main` (`252579c`), this branch added end-to-end CSV bulk vehicle ingestion:
 
 - **Backend**: Added `BulkImportOptions`, `VehicleImportResponse` / `VehicleImportRowResult`, `IVehicleImportService`, `VehicleImportService` (using `CsvHelper 33.1.0`), `POST /api/vehicles/import` on `VehiclesController`, DI & option validation wiring in `Program.cs`, and `BulkImport` config section in `appsettings.json`.
-- **Frontend**: Added `BulkImportForm.jsx` (file picker, sample CSV download, duplicate-submit guard, loading state, whole-file error banner, summary counters, per-row result cards), added `importVehiclesCsv(file)` in `vehicleApi.js`, composed the sidebar stack in `DashboardPage.jsx`, removed sticky class conflict in `VehicleForm.jsx`, and styled bulk import cards in `index.css`.
+- **Frontend**: Added `BulkImportForm.jsx` (file picker, sample CSV download, duplicate-submit guard, loading state, whole-file error banner, summary counters, per-row result cards), added `importVehiclesCsv(file)` in `vehicleApi.js`, composed the sidebar stack in `DashboardPage.jsx`, and styled bulk import cards in `index.css`.
 - **Repository Hygiene**: Updated `.gitignore` to ignore local SQLite database files (`*.db`, `*.db-shm`, `*.db-wal`, `*.sqlite`, `*.sqlite3`).
 
 ---
 
-## 4. Explicit Verification & Truthfulness Notes
+## 4. What Was Added on `feature/google-drive-image-retrieval`
 
-- **Automated Test Suite (`dotnet test`)**: Passed (`138` unit tests and `59` integration tests = `197` total) after backend commit `a13313b`. Commit `49e9d84` subsequently modified `VehicleImportService.cs` alongside frontend files; after `49e9d84`, `dotnet build`, `npm run build`, and live headless browser checks passed, while `dotnet test` was **not** re-run after `49e9d84` (dedicated unit/integration tests for `POST /api/vehicles/import` are also not yet added in `tests/`).
-- **Important Naming Reality**: Retrievers (`DirectImageRetriever`, `HtmlImageRetriever`) are concrete scoped classes orchestrated directly by `RetrievalOrchestrator` — there is **no** `IImageRetriever` interface in the checked-out codebase (it was removed during cleanup in `main` commit `4ae357f`). Similarly, `ImageStatus` only has `Completed` and `Failed`. Always state the actual checked-out design during interviews.
+Building on top of CSV bulk import, the `feature/google-drive-image-retrieval` branch adds:
+
+1. **Google Drive Public Image Retrieval (`GoogleDriveImageRetriever`)**:
+   - Detects public Google Drive sharing links (`https://drive.google.com/file/d/{id}/view...`, `/open?id={id}`, `/uc?id={id}`).
+   - Translates them into direct download endpoints (`/uc?export=download&id={id}`).
+   - Handles Google Drive large-file virus-scan warning pages by extracting `confirm={token}` cookies/query params and resending the request.
+   - Enforces domain boundaries (`drive.google.com`, `drive.usercontent.google.com`), 15s timeouts, and 20 MB bounded streaming.
+   - Registers `Strategy = "GoogleDrive"` in `VehicleImage` metadata.
+2. **Simplified URL Validation**:
+   - Streamlined `UrlValidator` to enforce scheme (`http`/`https`), allowed ports (`80`, `443`), length, no userinfo, valid domain syntax, and `localhost` / loopback literal blocking.
+   - Removed complex CIDR blocklists and DNS IP-pinning socket callbacks (`DestinationValidator`, `SsrfGuardHttpHandler`) to maintain a clean portfolio architecture.
+   - Renamed integration suite to `UrlValidationTests.cs`.
+3. **Static Sidebar & Scrollable Catalog Dashboard**:
+   - Styled the left submission section as a static console window with macOS-style window control dots (`● ● ●`), title bar, and action dots.
+   - Made the right vehicle catalog independently scrollable with a sticky header, ensuring submission forms remain permanently visible while browsing vehicle cards.
+
+---
+
+## 5. Verification & Test Suite Status
+
+- **Automated Test Suite (`dotnet test --configuration Release`)**: Passed (`115/115` total — `65` unit tests, `50` integration tests, `0` failed, `0` skipped).
+- **Frontend Build (`npm run build`)**: Passed (`vite build` in 1.14s, 37 modules transformed).
+- **Live Servers**: Backend running on port 5080 with SQLite; Frontend running on Vite port 5173 proxying `/api` and `/health`.

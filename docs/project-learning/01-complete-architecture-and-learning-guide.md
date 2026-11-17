@@ -1,6 +1,6 @@
 # Complete Architecture & Technical Learning Guide
 
-This guide teaches the **VehicleImageSystem** (`URL-to-Image`) codebase on branch `feature/csv-bulk-import` (`49e9d84`) from the ground up: first high-level architecture and honest boundaries, then 15 sequential learning modules mapped directly to classes and methods, followed by 20 Mermaid architectural/sequence/ER diagrams and 32 end-to-end execution scenarios.
+This guide teaches the **VehicleImageSystem** (`URL-to-Image`) codebase on branch `feature/google-drive-image-retrieval` (built upon `feature/csv-bulk-import` and `main`) from the ground up: first high-level architecture and honest boundaries, then 15 sequential learning modules mapped directly to classes and methods, followed by 20 Mermaid architectural/sequence/ER diagrams and 32 end-to-end execution scenarios.
 
 ---
 
@@ -10,7 +10,7 @@ This guide teaches the **VehicleImageSystem** (`URL-to-Image`) codebase on branc
 VehicleImageSystem solves an enterprise ingestion problem: **never trust or hotlink external supplier image URLs at runtime**. When a user submits a vehicle record (either one-by-one via JSON or up to 50 rows via CSV upload), the backend must:
 1. Validate the URL against basic URL policy rules (`UrlValidator`) before opening any socket.
 2. Fetch the target safely using a configured `SocketsHttpHandler` (`AllowAutoRedirect = false`, `UseCookies = false`, gzip/deflate/brotli decompression, connect timeout), following redirects manually with per-hop URL policy re-validation, capping timeouts and stream bytes, and retrying only safe transient errors.
-3. Handle both direct image URLs and static HTML listing pages without double-fetching via mandatory `HEAD`.
+3. Handle direct image URLs, Google Drive public links, and static HTML listing pages without double-fetching via mandatory `HEAD`.
 4. Verify actual binary signatures (`JPEG`, `PNG`, `WebP`), reject spoofing/bombs/corrupted images by full pixel decoding via `SixLabors.ImageSharp`, and compute SHA-256.
 5. Persist an independent copy outside the web root via atomic write-then-move (`LocalFileStorage`).
 6. Commit metadata (`Vehicle` + `VehicleImage`) transactionally to SQL Server (or SQLite in local dev/test), running compensating file deletes if persistence or client connection aborts.
