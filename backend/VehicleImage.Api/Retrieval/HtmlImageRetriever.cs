@@ -30,18 +30,6 @@ public sealed record ImageCandidate(
 
 public sealed partial class HtmlImageRetriever
 {
-    private static readonly string[] VehicleKeywords =
-    [
-        "vehicle", "car", "auto", "exterior", "hero", "gallery",
-        "main", "primary", "listing", "photo", "sedan", "suv", "truck", "coupe"
-    ];
-
-    private static readonly string[] BoilerplateContainerMarkers =
-    [
-        "header", "footer", "nav", "navbar", "sidebar", "menu",
-        "cookie", "modal", "banner", "ad", "ads", "sponsor", "related"
-    ];
-
     private static readonly string[] HtmlErrorPhrases =
     [
         "404 not found",
@@ -88,7 +76,7 @@ public sealed partial class HtmlImageRetriever
             throw ImageIngestionException.NoImageFound();
         }
 
-        int maxToTry = Math.Max(1, _options.MaxCandidates);
+        int maxToTry = Math.Min(3, Math.Max(1, _options.MaxCandidates));
         int attempted = 0;
         ImageIngestionException? lastCandidateFailure = null;
 
@@ -127,7 +115,7 @@ public sealed partial class HtmlImageRetriever
                 lastCandidateFailure = ex;
                 _logger.LogInformation(
                     "HTML candidate {Index} ({CandidateUrl}) failed retrieval with [{Code}]; trying next candidate if available.",
-                    attempted, candidate.Url, ex.Code);
+                    attempted, UrlValidator.RedactForLogging(candidate.Url), ex.Code);
             }
 
             if (retrieved is not null)
@@ -361,18 +349,12 @@ public sealed partial class HtmlImageRetriever
             return;
         }
 
-        int score = CalculateScore(resolvedUri, source, declaredWidth, declaredHeight, node);
-        if (score <= 0)
-        {
-            return;
-        }
-
         candidates.Add(new ImageCandidate(
             Url: resolvedUri,
             Source: source,
             DeclaredWidth: declaredWidth,
             DeclaredHeight: declaredHeight,
-            Score: score));
+            Score: GetCandidatePriority(source, declaredWidth, declaredHeight)));
     }
 
     private bool MatchesIgnoredPattern(Uri uri, HtmlNode node)
@@ -401,77 +383,26 @@ public sealed partial class HtmlImageRetriever
         return false;
     }
 
-    private int CalculateScore(
-        Uri uri,
+    private static int GetCandidatePriority(
         CandidateSourceKind source,
         int? declaredWidth,
-        int? declaredHeight,
-        HtmlNode node)
+        int? declaredHeight)
     {
-        int score = source switch
+        int priority = source switch
         {
-            CandidateSourceKind.OgImage => _options.OgImageWeight,
-            CandidateSourceKind.TwitterImage => _options.TwitterImageWeight,
-            CandidateSourceKind.Srcset => _options.SrcsetWeight,
-            CandidateSourceKind.DataSrc => _options.DataSrcWeight,
-            CandidateSourceKind.Img => _options.ImgSrcWeight,
-            _ => 50
+            CandidateSourceKind.OgImage => 400,
+            CandidateSourceKind.TwitterImage => 300,
+            CandidateSourceKind.Srcset => 200,
+            CandidateSourceKind.DataSrc or CandidateSourceKind.Img => 100,
+            _ => 0
         };
 
-        if ((declaredWidth.HasValue && declaredWidth.Value >= 400) ||
-            (declaredHeight.HasValue && declaredHeight.Value >= 300))
+        if (declaredWidth >= 400 || declaredHeight >= 300)
         {
-            score += _options.LargeDimensionBonus;
+            priority += 50;
         }
 
-        string combinedSignals = string.Concat(
-            uri.AbsolutePath, " ",
-            node.GetAttributeValue("alt", string.Empty), " ",
-            node.GetAttributeValue("class", string.Empty), " ",
-            node.GetAttributeValue("id", string.Empty)).ToLowerInvariant();
-
-        foreach (string keyword in VehicleKeywords)
-        {
-            if (combinedSignals.Contains(keyword, StringComparison.Ordinal))
-            {
-                score += _options.VehicleKeywordBonus;
-                break;
-            }
-        }
-
-        if (IsInsideBoilerplateContainer(node))
-        {
-            score -= _options.BoilerplateContainerPenalty;
-        }
-
-        return score;
-    }
-
-    private static bool IsInsideBoilerplateContainer(HtmlNode node)
-    {
-        for (HtmlNode? current = node.ParentNode; current is not null; current = current.ParentNode)
-        {
-            string tag = current.Name.ToLowerInvariant();
-            if (tag is "header" or "nav" or "footer" or "aside")
-            {
-                return true;
-            }
-
-            string classAndId = string.Concat(
-                current.GetAttributeValue("class", string.Empty), " ",
-                current.GetAttributeValue("id", string.Empty), " ",
-                current.GetAttributeValue("role", string.Empty)).ToLowerInvariant();
-
-            foreach (string marker in BoilerplateContainerMarkers)
-            {
-                if (classAndId.Contains(marker, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return priority;
     }
 
     private static bool IsHtmlErrorPage(HtmlDocument doc)

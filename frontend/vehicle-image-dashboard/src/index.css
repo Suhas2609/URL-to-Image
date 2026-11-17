@@ -515,6 +515,7 @@ body {
   margin-top: auto;
   padding-top: 0.5rem;
   border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
 }
 
 .replace-drawer {
@@ -529,6 +530,55 @@ body {
 .replace-actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.details-panel {
+  padding: 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-subtle);
+}
+
+.details-panel h4 {
+  margin: 0 0 0.65rem;
+  font-size: 0.82rem;
+}
+
+.details-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.details-list > div {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 0.5rem;
+}
+
+.details-list dt {
+  color: var(--text-muted);
+}
+
+.details-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+}
+
+.details-muted,
+.details-error {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.details-muted {
+  color: var(--text-muted);
+}
+
+.details-error {
+  color: var(--status-danger-text);
 }
 
 .empty-catalog {

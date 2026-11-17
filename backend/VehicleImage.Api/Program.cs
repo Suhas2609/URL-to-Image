@@ -194,6 +194,53 @@ static void InitializeAndVerifyStorageRoot(IServiceProvider services, IWebHostEn
     }
 
     Directory.CreateDirectory(fullStorageRoot);
+    VerifyStorageRootWritable(fullStorageRoot);
+}
+
+static void VerifyStorageRootWritable(string storageRoot)
+{
+    string probePath = Path.Combine(
+        storageRoot,
+        $".vehicle-image-write-check-{Guid.NewGuid():N}.tmp");
+    Exception? writeFailure = null;
+
+    try
+    {
+        using var probe = new FileStream(
+            probePath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 256,
+            options: FileOptions.WriteThrough);
+        probe.Write([0x56, 0x49]);
+        probe.Flush(flushToDisk: true);
+    }
+    catch (Exception ex)
+    {
+        writeFailure = ex;
+    }
+
+    try
+    {
+        if (File.Exists(probePath))
+        {
+            File.Delete(probePath);
+        }
+    }
+    catch (Exception ex)
+    {
+        throw new InvalidOperationException(
+            "Storage:RootPath verification temporary file could not be removed.",
+            ex);
+    }
+
+    if (writeFailure is not null)
+    {
+        throw new InvalidOperationException(
+            "Storage:RootPath could not be verified as writable.",
+            writeFailure);
+    }
 }
 
 public partial class Program;

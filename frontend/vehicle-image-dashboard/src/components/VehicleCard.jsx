@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import StatusBadge from './StatusBadge';
 import ImagePlaceholder from './ImagePlaceholder';
 import ImageReplaceForm from './ImageReplaceForm';
-import { resolveInternalImageUrl } from '../services/vehicleApi';
+import { getVehicle, resolveInternalImageUrl } from '../services/vehicleApi';
 
 function formatBytes(bytes) {
   if (!bytes || bytes <= 0) return null;
@@ -15,6 +15,11 @@ function formatBytes(bytes) {
 export default function VehicleCard({ vehicle, onUpdated }) {
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const [showReplaceForm, setShowReplaceForm] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [details, setDetails] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState(null);
+  const [replacementSuccess, setReplacementSuccess] = useState(false);
 
   const internalImageSrc = resolveInternalImageUrl(vehicle.imageUrl);
   const downloadHref = internalImageSrc ? `${internalImageSrc}/download` : null;
@@ -22,8 +27,32 @@ export default function VehicleCard({ vehicle, onUpdated }) {
   function handleReplaced() {
     setShowReplaceForm(false);
     setImageLoadFailed(false);
+    setDetails(null);
+    setReplacementSuccess(true);
     if (onUpdated) {
       onUpdated();
+    }
+  }
+
+  async function handleDetailsToggle() {
+    if (showDetails) {
+      setShowDetails(false);
+      return;
+    }
+
+    setShowDetails(true);
+    if (details) {
+      return;
+    }
+
+    setDetailsLoading(true);
+    setDetailsError(null);
+    try {
+      setDetails(await getVehicle(vehicle.id));
+    } catch (error) {
+      setDetailsError(error.detail || error.message || 'Unable to load vehicle details.');
+    } finally {
+      setDetailsLoading(false);
     }
   }
 
@@ -45,6 +74,11 @@ export default function VehicleCard({ vehicle, onUpdated }) {
       </div>
 
       <div className="vehicle-card-body">
+        {replacementSuccess && (
+          <div className="feedback-banner feedback-banner-success" role="status">
+            Stored image replaced successfully.
+          </div>
+        )}
         <div className="vehicle-card-top">
           <div>
             <h3 className="vehicle-title">
@@ -89,6 +123,16 @@ export default function VehicleCard({ vehicle, onUpdated }) {
           )}
 
           <button
+            id={`details-${vehicle.id}`}
+            type="button"
+            className="btn-secondary"
+            onClick={handleDetailsToggle}
+            aria-expanded={showDetails}
+          >
+            {showDetails ? 'Hide Details' : 'View Details'}
+          </button>
+
+          <button
             id={`toggle-replace-${vehicle.id}`}
             type="button"
             className="btn-secondary"
@@ -97,6 +141,50 @@ export default function VehicleCard({ vehicle, onUpdated }) {
             {showReplaceForm ? 'Close Replace' : 'Replace Image'}
           </button>
         </div>
+
+        {showDetails && (
+          <div className="details-panel" aria-live="polite">
+            <h4>Vehicle details</h4>
+            {detailsLoading && <p className="details-muted">Loading details...</p>}
+            {detailsError && (
+              <p className="details-error" role="alert">
+                {detailsError}
+              </p>
+            )}
+            {details && (
+              <dl className="details-list">
+                <div>
+                  <dt>Vehicle ID</dt>
+                  <dd>{details.id}</dd>
+                </div>
+                <div>
+                  <dt>Image ID</dt>
+                  <dd>{details.imageId || 'Unavailable'}</dd>
+                </div>
+                <div>
+                  <dt>Content type</dt>
+                  <dd>{details.contentType || 'Unavailable'}</dd>
+                </div>
+                <div>
+                  <dt>Dimensions</dt>
+                  <dd>
+                    {details.width && details.height
+                      ? `${details.width} × ${details.height}px`
+                      : 'Unavailable'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Retrieved by</dt>
+                  <dd>{details.retrievalStrategy || 'Unavailable'}</dd>
+                </div>
+                <div>
+                  <dt>Updated</dt>
+                  <dd>{new Date(details.updatedAt).toLocaleString()}</dd>
+                </div>
+              </dl>
+            )}
+          </div>
+        )}
 
         {showReplaceForm && (
           <ImageReplaceForm

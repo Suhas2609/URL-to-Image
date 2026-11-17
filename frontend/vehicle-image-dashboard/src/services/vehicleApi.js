@@ -27,10 +27,18 @@ async function parseResponse(response) {
   }
 
   if (errorPayload && typeof errorPayload === 'object') {
+    const validationDetails = errorPayload.errors
+      ? Object.values(errorPayload.errors).flat().join(' ')
+      : null;
+
     throw new ApiError({
       code: errorPayload.code || 'HTTP_ERROR',
       title: errorPayload.title || 'Request Failed',
-      detail: errorPayload.detail || `Server responded with status ${response.status}.`,
+      detail:
+        errorPayload.detail ||
+        validationDetails ||
+        errorPayload.title ||
+        `Server responded with status ${response.status}.`,
       status: errorPayload.status || response.status,
       traceId: errorPayload.traceId || null,
       retryable: errorPayload.retryable || false,
@@ -46,25 +54,42 @@ async function parseResponse(response) {
   });
 }
 
+async function request(url, options) {
+  try {
+    const response = await fetch(url, options);
+    return parseResponse(response);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    throw new ApiError({
+      code: 'NETWORK_ERROR',
+      title: 'Unable to reach the API',
+      detail: 'The backend could not be reached. Check that the ASP.NET Core API is running and try again.',
+      status: 0,
+      retryable: true
+    });
+  }
+}
+
 export async function listVehicles(page = 1, pageSize = 12) {
-  const response = await fetch(
+  return request(
     `${API_BASE}/api/vehicles?page=${encodeURIComponent(page)}&pageSize=${encodeURIComponent(pageSize)}`,
     {
       headers: { Accept: 'application/json' }
     }
   );
-  return parseResponse(response);
 }
 
 export async function getVehicle(id) {
-  const response = await fetch(`${API_BASE}/api/vehicles/${encodeURIComponent(id)}`, {
+  return request(`${API_BASE}/api/vehicles/${encodeURIComponent(id)}`, {
     headers: { Accept: 'application/json' }
   });
-  return parseResponse(response);
 }
 
 export async function createVehicle(payload) {
-  const response = await fetch(`${API_BASE}/api/vehicles`, {
+  return request(`${API_BASE}/api/vehicles`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -72,11 +97,10 @@ export async function createVehicle(payload) {
     },
     body: JSON.stringify(payload)
   });
-  return parseResponse(response);
 }
 
 export async function replaceImage(vehicleId, imageUrl) {
-  const response = await fetch(`${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/image`, {
+  return request(`${API_BASE}/api/vehicles/${encodeURIComponent(vehicleId)}/image`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -84,7 +108,6 @@ export async function replaceImage(vehicleId, imageUrl) {
     },
     body: JSON.stringify({ imageUrl })
   });
-  return parseResponse(response);
 }
 
 export function resolveInternalImageUrl(imageUrl) {

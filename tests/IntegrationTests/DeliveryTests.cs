@@ -26,6 +26,16 @@ public class DeliveryTests : IAsyncLifetime
     }
 
     [Fact]
+    public void StorageRootStartupProbe_IsRemovedAfterSuccessfulVerification()
+    {
+        Assert.True(Directory.Exists(_factory.TempStorageRoot));
+        Assert.Empty(Directory.GetFiles(
+            _factory.TempStorageRoot,
+            ".vehicle-image-write-check-*.tmp",
+            SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
     public async Task GetImageAndDownload_AfterSourceDisappears_StillServesStoredBytesWithSecurityHeaders()
     {
         const string sourcePath = "/fixtures/images/valid-car.jpg";

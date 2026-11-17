@@ -73,10 +73,15 @@ public class UrlValidatorTests
     [InlineData("http://printer.local/car.jpg")]
     [InlineData("http://metadata.internal/car.jpg")]
     [InlineData("http://127.0.0.1/car.jpg")]
+    [InlineData("http://2130706433/car.jpg")]       // Integer-form IPv4
+    [InlineData("http://127.1/car.jpg")]            // Shortened IPv4
+    [InlineData("http://0177.0.0.1/car.jpg")]       // Leading-zero IPv4
     [InlineData("http://10.0.0.1/car.jpg")]
     [InlineData("http://169.254.169.254/latest/meta-data/")]
     [InlineData("http://192.168.1.50/car.jpg")]
     [InlineData("http://[::1]/car.jpg")]
+    [InlineData("http://[::ffff:127.0.0.1]/car.jpg")] // IPv4-mapped IPv6
+    [InlineData("http://[::127.0.0.1]/car.jpg")]      // IPv4-compatible IPv6
     [InlineData("https://example.com:8080/car.jpg")]
     [InlineData("http://example.com:22/car.jpg")]
     public void Validate_UnsafeHostIpOrDisallowedPort_ThrowsUnsafeDestination(string rawUrl)
@@ -91,6 +96,19 @@ public class UrlValidatorTests
         var current = new Uri("https://supplier.example.com/listings/2026/sedan.html");
         Uri target = _validator.ValidateRedirectTarget(current, "../images/hero.jpg");
         Assert.Equal("https://supplier.example.com/listings/images/hero.jpg", target.AbsoluteUri);
+    }
+
+    [Fact]
+    public void RedactForLogging_RemovesQueryAndFragment()
+    {
+        var source = new Uri("https://supplier.example.com/car.jpg?api_key=secret#details");
+
+        string redacted = UrlValidator.RedactForLogging(source);
+
+        Assert.Equal("https://supplier.example.com/car.jpg", redacted);
+        Assert.DoesNotContain("secret", redacted);
+        Assert.DoesNotContain("?", redacted);
+        Assert.DoesNotContain("#", redacted);
     }
 
     [Theory]

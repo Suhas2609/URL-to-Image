@@ -6,7 +6,7 @@ public sealed class HtmlExtractionOptions
 {
     public const string SectionName = "HtmlExtraction";
 
-    [Range(1, 10)]
+    [Range(1, 3)]
     public int MaxCandidates { get; set; } = 3;
 
     [Range(1, 2000)]
@@ -33,12 +33,4 @@ public sealed class HtmlExtractionOptions
         "ad_"
     ];
 
-    public int OgImageWeight { get; set; } = 100;
-    public int TwitterImageWeight { get; set; } = 90;
-    public int SrcsetWeight { get; set; } = 70;
-    public int DataSrcWeight { get; set; } = 65;
-    public int ImgSrcWeight { get; set; } = 60;
-    public int VehicleKeywordBonus { get; set; } = 25;
-    public int LargeDimensionBonus { get; set; } = 20;
-    public int BoilerplateContainerPenalty { get; set; } = 50;
 }

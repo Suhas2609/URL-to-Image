@@ -6,11 +6,6 @@ namespace VehicleImage.Api.Retrieval;
 
 public sealed class RetrievalOrchestrator
 {
-    private static readonly string[] ImageExtensions =
-    [
-        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".tif", ".ico", ".svg", ".avif", ".heic"
-    ];
-
     private readonly DirectImageRetriever _directRetriever;
     private readonly HtmlImageRetriever _htmlRetriever;
 
@@ -37,7 +32,7 @@ public sealed class RetrievalOrchestrator
         bool transferredOwnership = false;
         try
         {
-            if (IsHtmlResponse(initialFetch) && !HasExplicitImageExtension(initialFetch.FinalSourceUrl))
+            if (IsHtmlResponse(initialFetch))
             {
                 string html = HtmlImageRetriever.DecodeHtml(initialFetch.Content, charset);
                 Uri finalPageUrl = initialFetch.FinalSourceUrl;
@@ -70,6 +65,11 @@ public sealed class RetrievalOrchestrator
 
     private static bool IsHtmlResponse(RetrievedImage retrieved)
     {
+        if (HasKnownImageExtension(retrieved.FinalSourceUrl))
+        {
+            return false;
+        }
+
         if (retrieved.Content.CanSeek)
         {
             retrieved.Content.Position = 0;
@@ -99,20 +99,24 @@ public sealed class RetrievalOrchestrator
             return false;
         }
 
-        bool mediaTypeHtml = string.Equals(retrieved.ContentType, "text/html", StringComparison.OrdinalIgnoreCase) ||
-                             string.Equals(retrieved.ContentType, "application/xhtml+xml", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(retrieved.ContentType, "text/html", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(retrieved.ContentType, "application/xhtml+xml", StringComparison.OrdinalIgnoreCase) ||
+               sample.StartsWith("<!doctype html", StringComparison.OrdinalIgnoreCase) ||
+               sample.StartsWith("<html", StringComparison.OrdinalIgnoreCase) ||
+               sample.StartsWith("<head", StringComparison.OrdinalIgnoreCase) ||
+               sample.StartsWith("<body", StringComparison.OrdinalIgnoreCase) ||
+               sample.StartsWith("<meta", StringComparison.OrdinalIgnoreCase) ||
+               sample.Contains("<html", StringComparison.OrdinalIgnoreCase) ||
+               sample.Contains("<img", StringComparison.OrdinalIgnoreCase) ||
+               sample.Contains("og:image", StringComparison.OrdinalIgnoreCase) ||
+               sample.Contains("twitter:image", StringComparison.OrdinalIgnoreCase);
+    }
 
-        bool bodyLooksLikeHtml = sample.StartsWith("<!doctype html", StringComparison.OrdinalIgnoreCase) ||
-                                 sample.StartsWith("<html", StringComparison.OrdinalIgnoreCase) ||
-                                 sample.StartsWith("<head", StringComparison.OrdinalIgnoreCase) ||
-                                 sample.StartsWith("<body", StringComparison.OrdinalIgnoreCase) ||
-                                 sample.StartsWith("<meta", StringComparison.OrdinalIgnoreCase) ||
-                                 sample.Contains("<html", StringComparison.OrdinalIgnoreCase) ||
-                                 sample.Contains("<img", StringComparison.OrdinalIgnoreCase) ||
-                                 sample.Contains("og:image", StringComparison.OrdinalIgnoreCase) ||
-                                 sample.Contains("twitter:image", StringComparison.OrdinalIgnoreCase);
-
-        return mediaTypeHtml || bodyLooksLikeHtml;
+    private static bool HasKnownImageExtension(Uri uri)
+    {
+        return Path.GetExtension(uri.AbsolutePath).ToLowerInvariant() is
+            ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif" or ".bmp" or
+            ".tiff" or ".tif" or ".ico" or ".svg" or ".avif" or ".heic";
     }
 
     private static bool StartsWithBinaryImageSignature(ReadOnlySpan<byte> header)
@@ -142,16 +146,4 @@ public sealed class RetrievalOrchestrator
         return false;
     }
 
-    private static bool HasExplicitImageExtension(Uri uri)
-    {
-        string path = uri.AbsolutePath;
-        foreach (string ext in ImageExtensions)
-        {
-            if (path.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
 }

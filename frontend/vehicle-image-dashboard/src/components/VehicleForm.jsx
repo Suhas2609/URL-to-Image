@@ -217,6 +217,7 @@ export default function VehicleForm({ onVehicleCreated }) {
             feedback.type === 'error' ? 'feedback-banner-error' : 'feedback-banner-success'
           }`}
           role="alert"
+          aria-live="polite"
         >
           <div className="feedback-code-header">
             <span className="error-code-pill">{feedback.code}</span>

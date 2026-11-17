@@ -51,26 +51,7 @@ public sealed class VehicleService : IVehicleService
             UpdatedAt = utcNow
         };
 
-        var vehicleImage = new VehicleImageEntity
-        {
-            Id = ingested.ImageId,
-            VehicleId = vehicle.Id,
-            SourceUrl = ingested.SourceUrl,
-            FinalSourceUrl = ingested.FinalSourceUrl,
-            StorageKey = ingested.StorageKey,
-            ContentType = ingested.ContentType,
-            FileSize = ingested.FileSize,
-            Width = ingested.Width,
-            Height = ingested.Height,
-            Format = ingested.Format,
-            RetrievalStrategy = ingested.RetrievalStrategy,
-            Status = ImageStatus.Completed,
-            FailureReason = null,
-            Sha256 = ingested.Sha256,
-            CreatedAt = utcNow,
-            UpdatedAt = utcNow,
-            Vehicle = vehicle
-        };
+        var vehicleImage = CreateVehicleImage(vehicle, ingested, utcNow);
 
         vehicle.Image = vehicleImage;
 
@@ -162,26 +143,7 @@ public sealed class VehicleService : IVehicleService
             }
 
             DateTime utcNow = DateTime.UtcNow;
-            var newImage = new VehicleImageEntity
-            {
-                Id = ingested.ImageId,
-                VehicleId = vehicle.Id,
-                SourceUrl = ingested.SourceUrl,
-                FinalSourceUrl = ingested.FinalSourceUrl,
-                StorageKey = ingested.StorageKey,
-                ContentType = ingested.ContentType,
-                FileSize = ingested.FileSize,
-                Width = ingested.Width,
-                Height = ingested.Height,
-                Format = ingested.Format,
-                RetrievalStrategy = ingested.RetrievalStrategy,
-                Status = ImageStatus.Completed,
-                FailureReason = null,
-                Sha256 = ingested.Sha256,
-                CreatedAt = utcNow,
-                UpdatedAt = utcNow,
-                Vehicle = vehicle
-            };
+            var newImage = CreateVehicleImage(vehicle, ingested, utcNow);
 
             vehicle.UpdatedAt = utcNow;
             _dbContext.VehicleImages.Add(newImage);
@@ -308,6 +270,33 @@ public sealed class VehicleService : IVehicleService
     }
 
     public static string BuildInternalImageUrl(Guid imageId) => $"/api/images/{imageId}";
+
+    private static VehicleImageEntity CreateVehicleImage(
+        Vehicle vehicle,
+        IngestedImage ingested,
+        DateTime utcNow)
+    {
+        return new VehicleImageEntity
+        {
+            Id = ingested.ImageId,
+            VehicleId = vehicle.Id,
+            SourceUrl = ingested.SourceUrl,
+            FinalSourceUrl = ingested.FinalSourceUrl,
+            StorageKey = ingested.StorageKey,
+            ContentType = ingested.ContentType,
+            FileSize = ingested.FileSize,
+            Width = ingested.Width,
+            Height = ingested.Height,
+            Format = ingested.Format,
+            RetrievalStrategy = ingested.RetrievalStrategy,
+            Status = ImageStatus.Completed,
+            FailureReason = null,
+            Sha256 = ingested.Sha256,
+            CreatedAt = utcNow,
+            UpdatedAt = utcNow,
+            Vehicle = vehicle
+        };
+    }
 
     private static VehicleResponse MapToResponse(Vehicle vehicle)
     {

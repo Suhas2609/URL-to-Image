@@ -103,11 +103,9 @@ public class DestinationValidator
                 return IsAllowed(embeddedV4);
             }
 
-            // Check NAT64 well-known prefix 64:ff9b::/96 and 64:ff9b:1::/48 -> last 4 bytes are IPv4
-            if (bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xff && bytes[3] == 0x9b)
+            if (TryDecodeNat64EmbeddedAddress(bytes, out var embeddedNat64))
             {
-                var embeddedV4 = new IPAddress(new ReadOnlySpan<byte>(bytes, 12, 4));
-                return IsAllowed(embeddedV4);
+                return IsAllowed(embeddedNat64);
             }
 
             // Check 6to4 prefix 2002::/16 -> bytes 2..5 are the embedded IPv4 address
@@ -127,6 +125,32 @@ public class DestinationValidator
         }
 
         return true;
+    }
+
+    private static bool TryDecodeNat64EmbeddedAddress(byte[] bytes, out IPAddress embeddedAddress)
+    {
+        embeddedAddress = null!;
+
+        // RFC 6052 well-known prefix: 64:ff9b::/96.
+        if (bytes.AsSpan(0, 12).SequenceEqual(
+                new byte[] { 0x00, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0 }))
+        {
+            embeddedAddress = new IPAddress(new ReadOnlySpan<byte>(bytes, 12, 4));
+            return true;
+        }
+
+        // Preserve the deployment-specific 64:ff9b:1::/48 profile. RFC 6052
+        // reserves byte 8 in this layout, so reject non-zero values instead
+        // of treating an unrelated address as a translated IPv4 destination.
+        if (bytes.AsSpan(0, 6).SequenceEqual(
+                new byte[] { 0x00, 0x64, 0xFF, 0x9B, 0, 1 }) &&
+            bytes[8] == 0)
+        {
+            embeddedAddress = new IPAddress([bytes[6], bytes[7], bytes[9], bytes[10]]);
+            return true;
+        }
+
+        return false;
     }
 
     public virtual async Task<IReadOnlyList<IPAddress>> ResolveAndValidateAsync(

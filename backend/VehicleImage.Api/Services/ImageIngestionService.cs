@@ -58,7 +58,7 @@ public sealed class ImageIngestionService : IImageIngestionService
                     _logger.LogInformation(
                         "Candidate {CandidateNumber} from {FinalSourceUrl} (strategy={Strategy}) failed image validation [{Code}]: {Message}",
                         candidateNumber,
-                        retrieved.FinalSourceUrl,
+                        UrlValidator.RedactForLogging(retrieved.FinalSourceUrl),
                         retrieved.Strategy,
                         ex.Code,
                         ex.Message);

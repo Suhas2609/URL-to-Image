@@ -144,6 +144,20 @@ dotnet test
 
 Integration tests use isolated SQLite databases and temporary storage directories. SQL Server remains the default application provider; SQLite `EnsureCreated()` is used only for isolated test databases.
 
+### Frontend workflow
+
+The React dashboard uses only the backend API:
+
+1. Submit make, model, optional variant, year, and a supplier URL.
+2. Wait for `POST /api/vehicles` to confirm retrieval, validation, storage, and persistence.
+3. Browse the paged vehicle catalog and load optional details with `GET /api/vehicles/{id}`.
+4. View images through the returned internal `/api/images/{id}` URL. Supplier image URLs are never used as image sources.
+5. Replace an image with `PUT /api/vehicles/{id}/image`; a failed replacement leaves the current stored image displayed.
+
+For a separately hosted frontend, set `VITE_API_BASE_URL` to the API origin. During local Vite development, `VITE_API_TARGET` controls the `/api` proxy target (default `http://localhost:5080`).
+
+The backend accepts direct image URLs, redirecting image URLs, and static HTML pages containing supported image metadata or image elements. Images are limited to validated JPEG, PNG, and WebP content, with magic-byte checks, dimension and pixel limits, bounded streaming, and full decoding before local storage.
+
 ---
 
 ## API Reference

@@ -25,19 +25,7 @@ public sealed class UrlValidator
             throw ImageIngestionException.InvalidUrl("The image URL is required.");
         }
 
-        string trimmed = raw.Trim();
-        if (trimmed.Length > _options.MaxUrlLength)
-        {
-            throw ImageIngestionException.InvalidUrl($"The URL exceeds the maximum length of {_options.MaxUrlLength} characters.");
-        }
-
-        foreach (char c in trimmed)
-        {
-            if (char.IsControl(c))
-            {
-                throw ImageIngestionException.InvalidUrl("The URL contains invalid control characters.");
-            }
-        }
+        string trimmed = ValidateUrlText(raw, "URL");
 
         if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
         {
@@ -56,19 +44,7 @@ public sealed class UrlValidator
             throw ImageIngestionException.InvalidUrl("Redirect response did not include a valid Location header.");
         }
 
-        string trimmed = locationHeader.Trim();
-        if (trimmed.Length > _options.MaxUrlLength)
-        {
-            throw ImageIngestionException.InvalidUrl($"Redirect target URL exceeds the maximum length of {_options.MaxUrlLength} characters.");
-        }
-
-        foreach (char c in trimmed)
-        {
-            if (char.IsControl(c))
-            {
-                throw ImageIngestionException.InvalidUrl("Redirect target URL contains invalid control characters.");
-            }
-        }
+        string trimmed = ValidateUrlText(locationHeader, "Redirect target URL");
 
         if (!Uri.TryCreate(currentUri, trimmed, out var targetUri))
         {
@@ -76,6 +52,30 @@ public sealed class UrlValidator
         }
 
         return ValidateUriPolicy(targetUri);
+    }
+
+    public static string RedactForLogging(Uri uri)
+    {
+        ArgumentNullException.ThrowIfNull(uri);
+        return uri.GetLeftPart(UriPartial.Path);
+    }
+
+    private string ValidateUrlText(string raw, string description)
+    {
+        string trimmed = raw.Trim();
+        if (trimmed.Length > _options.MaxUrlLength)
+        {
+            throw ImageIngestionException.InvalidUrl(
+                $"{description} exceeds the maximum length of {_options.MaxUrlLength} characters.");
+        }
+
+        if (trimmed.Any(char.IsControl))
+        {
+            throw ImageIngestionException.InvalidUrl(
+                $"{description} contains invalid control characters.");
+        }
+
+        return trimmed;
     }
 
     private Uri ValidateUriPolicy(Uri uri)

@@ -25,6 +25,7 @@ public class DestinationValidatorTests
     [InlineData("2606:4700:4700::1111")]
     [InlineData("::ffff:8.8.8.8")]
     [InlineData("64:ff9b::8.8.8.8")]
+    [InlineData("64:ff9b:1:808:0:808::")] // Deployment /48 embedding 8.8.8.8
     public void IsAllowed_PublicAddressesAndBoundaries_ReturnsTrue(string ip)
     {
         Assert.True(_validator.IsAllowed(IPAddress.Parse(ip)));
@@ -72,12 +73,21 @@ public class DestinationValidatorTests
     [InlineData("::ffff:169.254.169.254")] // IPv4-mapped metadata
     [InlineData("64:ff9b::127.0.0.1")] // NAT64 loopback
     [InlineData("64:ff9b::169.254.169.254")] // NAT64 metadata
+    [InlineData("64:ff9b:1:a00:0:5::")] // Deployment /48 embedding 10.0.0.5
+    [InlineData("64:ff9b:1:7f00:0:1::")] // Deployment /48 embedding 127.0.0.1
     [InlineData("2002:7f00:0001::")]   // 6to4 embedding 127.0.0.1
     [InlineData("2002:0a00:0001::")]   // 6to4 embedding 10.0.0.1
     public void IsAllowed_BlockedIpv4AndIpv6Ranges_ReturnsFalse(string ip)
     {
         Assert.False(_validator.IsAllowed(IPAddress.Parse(ip)));
     }
+
+    [Fact]
+    public void IsAllowed_Nat64NetworkSpecificPrefixWithNonZeroReservedOctet_IsBlocked()
+    {
+        Assert.False(_validator.IsAllowed(IPAddress.Parse("64:ff9b:1:a00:1:5::")));
+    }
+
 
     [Fact]
     public async Task ResolveAndValidateAsync_MixedPublicAndPrivateAddresses_ThrowsUnsafeDestination()

@@ -93,7 +93,7 @@ public class SsrfSecurityTests : IAsyncLifetime
     [Fact]
     public async Task CreateVehicle_DnsRebindingFromPublicToPrivateAcrossRedirect_IsRejectedAtConnectTime()
     {
-        int dnsCallCount = 0;
+        bool rebindToPrivateAddress = false;
         using var rebindFactory = new ApiFactory(
             _supplier.Port,
             useStrictProductionSsrfValidator: false,
@@ -101,34 +101,35 @@ public class SsrfSecurityTests : IAsyncLifetime
             {
                 if (string.Equals(host, "rebind.attacker.example.com", StringComparison.OrdinalIgnoreCase))
                 {
-                    dnsCallCount++;
-                    // First resolution returns loopback (representing the initial redirect server in test),
-                    // second resolution rebinds to cloud metadata IP 169.254.169.254!
-                    return dnsCallCount == 1
-                        ? new ValueTask<IPAddress[]>([IPAddress.Loopback])
-                        : new ValueTask<IPAddress[]>([IPAddress.Parse("169.254.169.254")]);
+                    return rebindToPrivateAddress
+                        ? new ValueTask<IPAddress[]>([IPAddress.Parse("169.254.169.254")])
+                        : new ValueTask<IPAddress[]>([IPAddress.Loopback]);
                 }
                 return new ValueTask<IPAddress[]>([IPAddress.Loopback]);
             });
 
         using var client = rebindFactory.CreateClient();
 
-        // First request redirects to a second URL on the same host, triggering a new resolution or re-validation
         var request = new CreateVehicleRequest
         {
             Make = "Security",
             Model = "RebindHop",
             Year = 2026,
-            ImageUrl = $"http://rebind.attacker.example.com:{_supplier.Port}/redirect/chain-start"
+            ImageUrl = $"http://rebind.attacker.example.com:{_supplier.Port}/fixtures/images/valid-car.jpg"
         };
 
-        // Call 1 resolves to Loopback (redirect hop 1), then hop 2 or second request resolves to 169.254.169.254
-        _ = await client.PostAsJsonAsync("/api/vehicles", request);
+        HttpResponseMessage firstResponse = await client.PostAsJsonAsync("/api/vehicles", request);
+        Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
+        Assert.True(_supplier.TotalRequests > 0);
+
+        _supplier.ResetCounters();
+        rebindToPrivateAddress = true;
         HttpResponseMessage secondResponse = await client.PostAsJsonAsync("/api/vehicles", request);
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, secondResponse.StatusCode);
         var failure = await secondResponse.Content.ReadFromJsonAsync<ImageFailureResponse>();
         Assert.NotNull(failure);
         Assert.Equal(ErrorCodes.UnsafeDestination, failure.Code);
+        Assert.Equal(0, _supplier.TotalRequests);
     }
 }

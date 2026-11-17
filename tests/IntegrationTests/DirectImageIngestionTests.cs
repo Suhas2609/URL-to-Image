@@ -113,6 +113,25 @@ public class DirectImageIngestionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreateVehicle_PermanentImageValidationFailure_IsNotRetried()
+    {
+        _supplier.ResetCounters();
+
+        var request = new CreateVehicleRequest
+        {
+            Make = "Toyota",
+            Model = "Supra",
+            Year = 2025,
+            ImageUrl = _supplier.Url("/fixtures/images/corrupted.jpg")
+        };
+
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/vehicles", request);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal(1, _supplier.GetRequestCount("/fixtures/images/corrupted.jpg"));
+    }
+
+    [Fact]
     public async Task CreateVehicle_Transient503Then200_RetriesAndSucceeds()
     {
         _supplier.ResetCounters();

@@ -42,7 +42,7 @@ export default function DashboardPage() {
         }}
       />
 
-      <section aria-labelledby="catalog-heading">
+      <section aria-labelledby="catalog-heading" aria-busy={loading}>
         <div className="catalog-header">
           <div className="catalog-title-group">
             <h2 id="catalog-heading">Internally Stored Vehicle Catalog</h2>
@@ -71,7 +71,12 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {!loading && vehicles.length === 0 && !loadError ? (
+        {loading && vehicles.length === 0 && !loadError ? (
+          <div className="empty-catalog" role="status">
+            <h3>Loading stored vehicles...</h3>
+            <p>Retrieving the latest records from the backend.</p>
+          </div>
+        ) : !loading && vehicles.length === 0 && !loadError ? (
           <div className="empty-catalog">
             <h3>No vehicles ingested yet</h3>
             <p>
