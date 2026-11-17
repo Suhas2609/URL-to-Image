@@ -8,13 +8,16 @@ public sealed class RetrievalOrchestrator
 {
     private readonly DirectImageRetriever _directRetriever;
     private readonly HtmlImageRetriever _htmlRetriever;
+    private readonly GoogleDriveImageRetriever _googleDriveRetriever;
 
     public RetrievalOrchestrator(
         DirectImageRetriever directRetriever,
-        HtmlImageRetriever htmlRetriever)
+        HtmlImageRetriever htmlRetriever,
+        GoogleDriveImageRetriever googleDriveRetriever)
     {
         _directRetriever = directRetriever;
         _htmlRetriever = htmlRetriever;
+        _googleDriveRetriever = googleDriveRetriever;
     }
 
     public async IAsyncEnumerable<RetrievedImage> RetrieveCandidatesAsync(
@@ -22,6 +25,12 @@ public sealed class RetrievalOrchestrator
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
+
+        if (_googleDriveRetriever.CanHandle(source))
+        {
+            yield return await _googleDriveRetriever.RetrieveAsync(source, cancellationToken);
+            yield break;
+        }
 
         // Single initial GET — no mandatory HEAD request (Decision 4 & Section 9.2)
         var (initialFetch, charset) = await _directRetriever.FetchWithRetriesAsync(
@@ -32,6 +41,27 @@ public sealed class RetrievalOrchestrator
         bool transferredOwnership = false;
         try
         {
+            if (_googleDriveRetriever.CanHandle(initialFetch.FinalSourceUrl))
+            {
+                Uri redirectedDriveUrl = initialFetch.FinalSourceUrl;
+                initialFetch.Dispose();
+                transferredOwnership = true;
+
+                RetrievedImage driveImage = await _googleDriveRetriever.RetrieveAsync(
+                    redirectedDriveUrl,
+                    cancellationToken);
+                yield return new RetrievedImage
+                {
+                    Content = driveImage.Content,
+                    ContentType = driveImage.ContentType,
+                    SourceUrl = source,
+                    FinalSourceUrl = driveImage.FinalSourceUrl,
+                    FileSize = driveImage.FileSize,
+                    Strategy = driveImage.Strategy
+                };
+                yield break;
+            }
+
             if (IsHtmlResponse(initialFetch))
             {
                 string html = HtmlImageRetriever.DecodeHtml(initialFetch.Content, charset);
@@ -63,7 +93,7 @@ public sealed class RetrievalOrchestrator
         }
     }
 
-    private static bool IsHtmlResponse(RetrievedImage retrieved)
+    internal static bool IsHtmlResponse(RetrievedImage retrieved)
     {
         if (HasKnownImageExtension(retrieved.FinalSourceUrl))
         {

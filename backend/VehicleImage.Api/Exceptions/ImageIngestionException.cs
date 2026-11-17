@@ -87,6 +87,12 @@ public sealed class ImageIngestionException : Exception
     public static ImageIngestionException NoImageFound(string detail = "No usable vehicle image candidate could be found on the supplied HTML page.")
         => new(ErrorCodes.NoImageFound, detail, isTransient: false);
 
+    public static ImageIngestionException UnsupportedSource(string detail = "The supplied source URL type is not supported.")
+        => new(ErrorCodes.UnsupportedSource, detail, isTransient: false);
+
+    public static ImageIngestionException ProviderAuthRequired(string detail = "The supplier resource requires authentication and is not publicly accessible.")
+        => new(ErrorCodes.ProviderAuthRequired, detail, isTransient: false);
+
     public static ImageIngestionException StorageFailed(string detail = "Failed to persist or read the image in internal storage.", Exception? inner = null)
         => new(ErrorCodes.StorageFailed, detail, isTransient: false, httpStatusCode: StatusCodes.Status500InternalServerError, innerException: inner);
 

@@ -23,6 +23,8 @@ public static class ErrorCodes
     public const string ImageTooSmall = "IMAGE_TOO_SMALL";
     public const string ImageDecodeFailed = "IMAGE_DECODE_FAILED";
     public const string NoImageFound = "NO_IMAGE_FOUND";
+    public const string UnsupportedSource = "UNSUPPORTED_SOURCE";
+    public const string ProviderAuthRequired = "PROVIDER_AUTH_REQUIRED";
     public const string StorageFailed = "STORAGE_FAILED";
     public const string DatabasePersistenceFailed = "DATABASE_PERSISTENCE_FAILED";
     public const string VehicleNotFound = "VEHICLE_NOT_FOUND";

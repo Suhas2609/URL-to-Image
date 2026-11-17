@@ -126,6 +126,7 @@ builder.Services.AddHttpClient(SsrfGuardHttpHandler.ClientName, client =>
 // 5. Retrieval and application services
 builder.Services.AddScoped<DirectImageRetriever>();
 builder.Services.AddScoped<HtmlImageRetriever>();
+builder.Services.AddScoped<GoogleDriveImageRetriever>();
 builder.Services.AddScoped<RetrievalOrchestrator>();
 builder.Services.AddScoped<ImageIngestionService>();
 builder.Services.AddScoped<IImageIngestionService>(sp => sp.GetRequiredService<ImageIngestionService>());
