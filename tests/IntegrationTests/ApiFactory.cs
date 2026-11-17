@@ -1,20 +1,21 @@
 using System.Net;
+using System.Net.Sockets;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Options;
+using VehicleImage.Api.Configuration;
 using VehicleImage.Api.Data;
-using VehicleImage.Api.Security;
+using VehicleImage.Api.Retrieval;
 
 namespace VehicleImage.IntegrationTests;
 
 public sealed class ApiFactory : WebApplicationFactory<Program>
 {
     private readonly int _allowedMockPort;
-    private readonly bool _useStrictProductionSsrfValidator;
-    private readonly Func<string, CancellationToken, ValueTask<IPAddress[]>>? _customDnsResolver;
     private readonly Action<IServiceCollection>? _serviceOverrides;
 
     public string TempStorageRoot { get; }
@@ -22,13 +23,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
 
     public ApiFactory(
         int allowedMockPort,
-        bool useStrictProductionSsrfValidator = false,
-        Func<string, CancellationToken, ValueTask<IPAddress[]>>? customDnsResolver = null,
         Action<IServiceCollection>? serviceOverrides = null)
     {
         _allowedMockPort = allowedMockPort;
-        _useStrictProductionSsrfValidator = useStrictProductionSsrfValidator;
-        _customDnsResolver = customDnsResolver;
         _serviceOverrides = serviceOverrides;
 
         string baseTemp = Path.Combine(Path.GetTempPath(), $"vehicle-img-int-{Guid.NewGuid():N}");
@@ -50,6 +47,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
                 ["Retrieval:TimeoutSeconds"] = "2",
                 ["Retrieval:ConnectTimeoutSeconds"] = "2",
                 ["Retrieval:MaxRedirects"] = "5",
+                ["Retrieval:AllowedPorts:0"] = "80",
+                ["Retrieval:AllowedPorts:1"] = "443",
+                ["Retrieval:AllowedPorts:2"] = _allowedMockPort.ToString(),
                 ["Retry:MaxAttempts"] = "3",
                 ["Retry:BaseDelayMs"] = "25",
                 ["Retry:MaxDelayMs"] = "100",
@@ -60,21 +60,45 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
-            if (_useStrictProductionSsrfValidator)
+            // Map mock hostname "supplier.test" to local Kestrel MockSupplierServer in test environment
+            services.PostConfigure<HttpClientFactoryOptions>(DirectImageRetriever.HttpClientName, options =>
             {
-                if (_customDnsResolver is not null)
+                options.HttpMessageHandlerBuilderActions.Add(handlerBuilder =>
                 {
-                    services.RemoveAll<DestinationValidator>();
-                    services.AddSingleton(new DestinationValidator(_customDnsResolver));
-                }
-            }
-            else
-            {
-                // Section 17.5: Permissive test double limited strictly to the MockSupplierServer host/port
-                services.RemoveAll<DestinationValidator>();
-                services.AddSingleton<DestinationValidator>(
-                    new MockServerLoopbackDestinationValidator(_allowedMockPort, _customDnsResolver));
-            }
+                    var retrievalOptions = handlerBuilder.Services.GetRequiredService<IOptions<RetrievalOptions>>().Value;
+                    handlerBuilder.PrimaryHandler = new SocketsHttpHandler
+                    {
+                        AllowAutoRedirect = false,
+                        UseProxy = false,
+                        UseCookies = false,
+                        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+                        ConnectTimeout = TimeSpan.FromSeconds(retrievalOptions.ConnectTimeoutSeconds),
+                        PooledConnectionLifetime = TimeSpan.FromSeconds(retrievalOptions.PooledConnectionLifetimeSeconds),
+                        MaxResponseHeadersLength = 64,
+                        ConnectCallback = async (context, cancellationToken) =>
+                        {
+                            IPAddress[] addresses = string.Equals(context.DnsEndPoint.Host, "supplier.test", StringComparison.OrdinalIgnoreCase)
+                                ? [IPAddress.Loopback]
+                                : await Dns.GetHostAddressesAsync(context.DnsEndPoint.Host, cancellationToken);
+
+                            var socket = new Socket(addresses[0].AddressFamily, SocketType.Stream, ProtocolType.Tcp)
+                            {
+                                NoDelay = true
+                            };
+                            try
+                            {
+                                await socket.ConnectAsync(new IPEndPoint(addresses[0], context.DnsEndPoint.Port), cancellationToken);
+                                return new NetworkStream(socket, ownsSocket: true);
+                            }
+                            catch
+                            {
+                                socket.Dispose();
+                                throw;
+                            }
+                        }
+                    };
+                });
+            });
 
             _serviceOverrides?.Invoke(services);
 
@@ -101,43 +125,6 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             {
                 // Ignore temp cleanup race on disposal
             }
-        }
-    }
-
-    private sealed class MockServerLoopbackDestinationValidator : DestinationValidator
-    {
-        private readonly int _mockPort;
-
-        public MockServerLoopbackDestinationValidator(
-            int mockPort,
-            Func<string, CancellationToken, ValueTask<IPAddress[]>>? customResolver)
-            : base(customResolver ?? DefaultMockResolver)
-        {
-            _mockPort = mockPort;
-        }
-
-        public override bool IsPortAllowed(int port, IReadOnlyCollection<int> configuredPorts)
-        {
-            return port == _mockPort || base.IsPortAllowed(port, configuredPorts);
-        }
-
-        public override bool IsAllowed(IPAddress address)
-        {
-            // Permit only IPv4 127.0.0.1 for the local MockSupplierServer; all other private/metadata IPs remain blocked!
-            if (address.Equals(IPAddress.Loopback))
-            {
-                return true;
-            }
-            return base.IsAllowed(address);
-        }
-
-        private static ValueTask<IPAddress[]> DefaultMockResolver(string host, CancellationToken ct)
-        {
-            if (string.Equals(host, "supplier.test", StringComparison.OrdinalIgnoreCase))
-            {
-                return new ValueTask<IPAddress[]>([IPAddress.Loopback]);
-            }
-            return new ValueTask<IPAddress[]>(Dns.GetHostAddressesAsync(host, ct));
         }
     }
 }

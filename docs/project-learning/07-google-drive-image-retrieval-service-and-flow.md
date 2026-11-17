@@ -20,7 +20,7 @@ When an HTTP `GET` request is issued to that URL:
 4. When passed to `HtmlImageRetriever`, candidate extraction finds zero candidates and throws `NO_IMAGE_FOUND`.
 
 ### 1.3 The Solution Architecture
-Instead of running expensive, fragile headless browsers (e.g., Puppeteer/Playwright) or requiring complex customer Google OAuth setup, the system implements a dedicated `GoogleDriveImageRetriever` that translates public Google Drive URLs directly into high-throughput binary download streams through the existing SSRF-guarded pipeline.
+Instead of running expensive, fragile headless browsers (e.g., Puppeteer/Playwright) or requiring complex customer Google OAuth setup, the system implements a dedicated `GoogleDriveImageRetriever` that translates public Google Drive URLs directly into high-throughput binary download streams through the existing URL-validated retrieval pipeline.
 
 ---
 
@@ -40,7 +40,7 @@ Instead of running expensive, fragile headless browsers (e.g., Puppeteer/Playwri
                                             ▼
                                ┌─────────────────────────┐
                                │      UrlValidator       │
-                               │  (Public IP / DNS SSRF) │
+                               │ (Scheme/Port/Loopback)  │
                                └────────────┬────────────┘
                                             │
                                             ▼
@@ -60,7 +60,7 @@ Instead of running expensive, fragile headless browsers (e.g., Puppeteer/Playwri
                         │                   ▼                            │
                         │      ┌─────────────────────────┐               │
                         │      │  DirectImageRetriever   │◄──────────────┘
-                        │      │  (SsrfGuardHttpHandler) │
+                        │      │  (SocketsHttpHandler)   │
                         │      └────────────┬────────────┘
                         │                   │ (If non-Drive redirected
                         │                   │  to Drive, returns here)
@@ -128,7 +128,7 @@ sequenceDiagram
     participant Orchestrator as RetrievalOrchestrator
     participant DriveRetriever as GoogleDriveImageRetriever
     participant DirectRetriever as DirectImageRetriever
-    participant SsrfHandler as SsrfGuardHttpHandler
+    participant HttpHandler as SocketsHttpHandler
     participant Google as Google Drive Servers
     participant Validator as ImageValidator
     participant Storage as LocalFileStorage
@@ -144,15 +144,15 @@ sequenceDiagram
     Note over DriveRetriever: Parse fileId & resourceKey<br/>Build https://drive.google.com/uc?export=download&id={id}
     
     DriveRetriever->>DirectRetriever: FetchWithRetriesAsync(downloadUri, "GoogleDrive")
-    DirectRetriever->>SsrfHandler: SendAsync(GET downloadUri)
-    SsrfHandler->>Google: GET /uc?export=download&id=...
-    Google-->>SsrfHandler: HTTP 303 See Other -> Location: drive.usercontent.google.com/download?...
+    DirectRetriever->>HttpHandler: SendAsync(GET downloadUri)
+    HttpHandler->>Google: GET /uc?export=download&id=...
+    Google-->>HttpHandler: HTTP 303 See Other -> Location: drive.usercontent.google.com/download?...
     
-    Note over SsrfHandler: Manual redirect validation:<br/>1. Max redirects check (<= 5)<br/>2. Public IP & DNS check<br/>3. Re-issue GET
+    Note over DirectRetriever: Manual redirect validation:<br/>1. Max redirects check (<= 5)<br/>2. UrlValidator.ValidateRedirectTarget<br/>3. Re-issue GET
     
-    SsrfHandler->>Google: GET /download?id=... (drive.usercontent.google.com)
-    Google-->>SsrfHandler: HTTP 200 OK (image/jpeg, 153,168 bytes binary)
-    SsrfHandler-->>DirectRetriever: HttpResponseMessage (capped at 20MB)
+    HttpHandler->>Google: GET /download?id=... (drive.usercontent.google.com)
+    Google-->>HttpHandler: HTTP 200 OK (image/jpeg, 153,168 bytes binary)
+    HttpHandler-->>DirectRetriever: HttpResponseMessage (capped at 20MB)
     DirectRetriever-->>DriveRetriever: RetrievedImage (Stream, ContentType: image/jpeg)
 
     Note over DriveRetriever: Verify !IsHtmlResponse(image)<br/>Rewrap SourceUrl to customer URL
@@ -176,28 +176,27 @@ sequenceDiagram
 
 ---
 
-## 5. Security & Boundary Protections
+## 5. Safeguards & Boundary Controls
 
-All security invariants established in the core architecture are strictly maintained:
+The core pipeline safeguards remain enforced:
 
-1. **SSRF & DNS Rebinding Protection**:
+1. **URL Policy & Manual Redirect Validation**:
    - `GoogleDriveImageRetriever` **never** makes independent `HttpClient` calls.
-   - All network traffic flows through `DirectImageRetriever` and `SsrfGuardHttpHandler`.
-   - Google Drive hosts are resolved through standard public DNS checks in `ConnectCallback` and forbidden IP ranges (`10.0.0.0/8`, `127.0.0.0/8`, `169.254.169.254`, `::1`, etc.) are rejected.
+   - All network traffic flows through `DirectImageRetriever`, with `AllowAutoRedirect = false` and `UrlValidator.ValidateRedirectTarget(...)` enforcing HTTP/HTTPS, allowed ports (`80`, `443`), and rejecting `localhost` / loopback destinations on every hop.
 
 2. **No Supplier Hotlinking**:
    - The supplier's Google Drive URL is never exposed to the browser or frontend.
    - The vehicle card `<img src="...">` points strictly to the internal API `/api/images/{id}`.
 
 3. **Strict Stream & Memory Caps**:
-   - The download stream is bounded by `MaxSizeBytes` (20 MB).
-   - In-memory decoding is guarded by `MaxPixels` (36 megapixels) and `MaxDimensions` (8192×8192).
+   - The download stream is bounded by `MaxDownloadBytes` (20 MB).
+   - In-memory decoding is guarded by `MaxPixels` (50 megapixels) and `MaxDimensions` (10000×10000).
 
 4. **Zero Script Execution**:
    - No headless browser is loaded. JavaScript inside Google Drive HTML pages cannot execute.
 
 5. **Cookie Isolation**:
-   - `SsrfGuardHttpHandler` runs with `UseCookies = false`. Requests do not carry ambient or server-level session cookies.
+   - `SocketsHttpHandler` runs with `UseCookies = false`. Requests do not carry ambient or server-level session cookies.
 
 ---
 
@@ -250,17 +249,13 @@ Upload the CSV via the **Bulk Import Vehicles (CSV)** panel. The Google Drive ro
 ## 8. Interview Defense Questions & Answers
 
 ### Q1: Why didn't you just use Puppeteer, Playwright, or Selenium to render the Google Drive link?
-> **Answer**: Headless browsers introduce immense CPU and memory overhead (~150–300 MB per browser instance), slow down request latency from ~500ms to 5–10 seconds, create cold-start concurrency bottlenecks, and introduce severe security attack surfaces (sandbox escapes, arbitrary JS execution, SSRF). Google Drive public files provide a clean direct download endpoint (`/uc?export=download&id=...`) that yields the exact binary bytes in a single streaming HTTP call, maintaining our existing 15s timeout, 20 MB bounded stream, and IP validation guarantees.
+> **Answer**: Headless browsers introduce immense CPU and memory overhead (~150–300 MB per browser instance), slow down request latency from ~500ms to 5–10 seconds, create cold-start concurrency bottlenecks, and introduce unnecessary attack surfaces (arbitrary JS execution, sandbox complexity). Google Drive public files provide a clean direct download endpoint (`/uc?export=download&id=...`) that yields the exact binary bytes in a single streaming HTTP call, maintaining our existing 15s timeout and 20 MB bounded stream guarantees.
 
 ### Q2: Why is Google OAuth not required for this implementation?
 > **Answer**: The requirement specifically targets publicly shared links (**"Anyone with the link"**). Google Drive serves public files without user credentials via its export download gateway (`drive.usercontent.google.com`). Introducing OAuth would require users to authorize a Google Cloud App, manage refresh tokens, and store credentials, which is unnecessary friction for public assets. Private Drive links are safely detected and rejected with `PROVIDER_AUTH_REQUIRED`.
 
-### Q3: How does this prevent SSRF if Google Drive redirects to an internal IP?
-> **Answer**: The implementation does not bypass `SsrfGuardHttpHandler`. When Google Drive redirects from `drive.google.com/uc` to `drive.usercontent.google.com/download`, `.NET`'s automated redirect follower is disabled (`AllowAutoRedirect = false`). Each redirect target is validated by `UrlValidator.ValidateRedirectTarget(...)`:
-> 1. Validates HTTPS scheme.
-> 2. Resolves DNS via `Dns.GetHostAddressesAsync`.
-> 3. Verifies every returned IP is a routable public IP via `DestinationValidator.IsRoutablePublicIp`.
-> 4. `ConnectCallback` pins and verifies the exact socket IP on connection. If Google ever redirected to `127.0.0.1` or `169.254.169.254`, the request would be terminated immediately with `UNSAFE_DESTINATION`.
+### Q3: How are redirects validated when Google Drive redirects to `drive.usercontent.google.com`?
+> **Answer**: `.NET`'s automated redirect follower is disabled (`AllowAutoRedirect = false`). Each redirect target is validated manually by `UrlValidator.ValidateRedirectTarget(...)` before issuing the next request, verifying HTTP/HTTPS scheme, allowed ports (`80`, `443`), valid hostname, URL length, and rejecting `localhost` or loopback targets. If a redirect ever targeted `localhost` or an unsupported scheme, it would be rejected immediately without following the redirect.
 
 ### Q4: What happens if a supplier uploads a 500 MB video or malicious zip file named with a `.jpg` link?
 > **Answer**: Defense in depth protects the system across three layers:

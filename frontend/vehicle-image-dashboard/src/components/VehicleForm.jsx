@@ -31,12 +31,12 @@ const DEMO_PRESETS = [
   },
   {
     id: 'preset-vehicle-c',
-    label: 'Vehicle C: SSRF / Blocked URL',
+    label: 'Vehicle C: Blocked Localhost URL',
     make: 'Audi',
     model: 'RS6 Avant',
     variant: 'Performance',
     year: 2026,
-    imageUrl: 'http://169.254.169.254/latest/meta-data/'
+    imageUrl: 'http://localhost/car.jpg'
   }
 ];
 
@@ -105,7 +105,7 @@ export default function VehicleForm({ onVehicleCreated }) {
         Submit Supplier Vehicle &amp; Image URL
       </h2>
       <p className="panel-description">
-        Fetches via SSRF-guarded streaming, validates magic bytes &amp; decoded dimensions, and persists internally.
+        Fetches via validated URL streaming, validates magic bytes &amp; decoded dimensions, and persists internally.
       </p>
 
       <div className="preset-group">

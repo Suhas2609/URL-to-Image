@@ -12,7 +12,7 @@ namespace VehicleImage.Api.Retrieval;
 /// <summary>
 /// Retrieves publicly shared ("Anyone with the link") Google Drive image files by translating
 /// sharing URLs into direct-download requests executed through <see cref="DirectImageRetriever"/>
-/// (preserving all SSRF, timeout, bounded-streaming, and retry guarantees).
+/// (preserving URL validation, timeout, bounded-streaming, and retry guarantees).
 /// OAuth and private Google Drive files are intentionally out of scope.
 /// </summary>
 public sealed partial class GoogleDriveImageRetriever

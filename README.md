@@ -1,6 +1,6 @@
 # VehicleImageSystem — Multi-Source Vehicle Image Retrieval, Validation, Storage & Delivery
 
-**VehicleImageSystem** (`VehicleImage.Api`) ingests supplier vehicle records and image URLs, retrieves the actual image bytes over an SSRF-guarded streaming HTTP pipeline, validates magic bytes and decoded dimensions with `SixLabors.ImageSharp`, stores validated images in internal storage outside the web root, persists metadata in Microsoft SQL Server via EF Core, and serves stored images exclusively from our own API (`/api/images/{id}`). Once ingested, the application has zero runtime dependency on the supplier's URL.
+**VehicleImageSystem** (`VehicleImage.Api`) ingests supplier vehicle records and image URLs, retrieves the actual image bytes over a bounded streaming HTTP pipeline with URL validation, validates magic bytes and decoded dimensions with `SixLabors.ImageSharp`, stores validated images in internal storage outside the web root, persists metadata in Microsoft SQL Server via EF Core, and serves stored images exclusively from our own API (`/api/images/{id}`). Once ingested, the application has zero runtime dependency on the supplier's URL.
 
 ---
 
@@ -9,10 +9,11 @@
 ```
 Supplier -> React Dashboard -> ASP.NET Core API (VehicleImage.Api)
   VehiclesController -> VehicleService -> ImageIngestionService
-     -> UrlValidator (syntax, scheme, userinfo, port & host policy)
+     -> UrlValidator (syntax, scheme, userinfo, port & localhost/loopback policy)
      -> RetrievalOrchestrator (single GET sniffing, no mandatory HEAD)
-        -> DirectImageRetriever (SSRF-safe ConnectCallback, manual redirects <= 5, 20 MB stream cap, transient retries)
+        -> DirectImageRetriever (SocketsHttpHandler, manual redirects <= 5, 20 MB stream cap, transient retries)
         -> HtmlImageRetriever (og:image, twitter:image, srcset, data-src, img ranking & multi-candidate fallback)
+        -> GoogleDriveImageRetriever (public "Anyone with the link" Drive files)
      -> RetrievedImage -> ImageValidator (magic bytes, Image.Identify dimension checks, full pixel decode, SHA-256)
      -> IImageStorage / LocalFileStorage (atomic temp-to-final write under vehicles/{yyyy}/{MM}/{guid}{ext})
   VehicleService -> SQL Server (transactional persistence + compensating file cleanup on failure)
@@ -23,11 +24,9 @@ Delivery: React Dashboard -> ImagesController -> ImageDeliveryService
 
 ### Key Architectural Guarantees
 
-1. **SSRF & DNS Rebinding Protection (`Security/`)**:
-   - `UrlValidator` enforces `http`/`https` schemes, allowed ports (`80`, `443`), no embedded credentials, and FQDN hostnames before opening any socket.
-   - `DestinationValidator` blocks loopback (`127.0.0.0/8`, `::1`), RFC 1918 private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), CGNAT (`100.64.0.0/10`), link-local and cloud metadata endpoints (`169.254.0.0/16`, `169.254.169.254`, `168.63.129.16`), unique local IPv6 (`fc00::/7`), IPv4-mapped IPv6 (`::ffff:0:0/96`), NAT64 (`64:ff9b::/96`), and 6to4 (`2002::/16`). If *any* resolved DNS record for a host is blocked, the destination is rejected.
-   - `SsrfGuardHttpHandler` uses `SocketsHttpHandler.ConnectCallback` to resolve and validate addresses at TCP socket connection time while preserving the original hostname on the HTTP request for `Host` header, TLS SNI, and TLS certificate hostname verification.
-   - Automatic redirects and proxies are disabled (`AllowAutoRedirect = false`, `UseProxy = false`). Redirects (`301`, `302`, `303`, `307`, `308`) are followed manually up to 5 hops with full URL and DNS re-validation on every hop.
+1. **URL Validation & HTTP Safeguards (`Security/`, `Retrieval/`)**:
+   - `UrlValidator` enforces `http`/`https` schemes, allowed ports (`80`, `443`), no embedded credentials, URL length limits, valid domain/IP hostnames, and rejects `localhost` and loopback addresses (`127.0.0.0/8`, `::1`).
+   - Automatic redirects and cookies are disabled (`AllowAutoRedirect = false`, `UseCookies = false`) on `SocketsHttpHandler`. Redirects (`301`, `302`, `303`, `307`, `308`) are followed manually up to 5 hops with full `UrlValidator` re-validation on every hop.
 
 2. **Bounded Streaming & Image Validation (`ImageProcessing/`)**:
    - Downloads are streamed through a running byte counter that aborts immediately with `IMAGE_TOO_LARGE` when decompressed bytes exceed `Retrieval:MaxDownloadBytes` (default 20 MB), regardless of whether `Content-Length` is missing or misleading.
@@ -64,14 +63,14 @@ VehicleImageSystem/
 │       ├── Entities/            # Vehicle & VehicleImage (with ImageStatus enum)
 │       ├── Data/                # ApplicationDbContext & EF entity configurations
 │       ├── Migrations/          # EF Core SQL Server migrations (InitialCreate)
-│       ├── Services/            # VehicleService, ImageIngestionService, ImageDeliveryService
-│       ├── Retrieval/           # RetrievalOrchestrator, Direct & Html retrievers
-│       ├── Security/            # UrlValidator, DestinationValidator, SsrfGuardHttpHandler
+│       ├── Services/            # VehicleService, ImageIngestionService, ImageDeliveryService, VehicleImportService
+│       ├── Retrieval/           # RetrievalOrchestrator, Direct, Html & GoogleDrive retrievers
+│       ├── Security/            # UrlValidator
 │       ├── ImageProcessing/     # ImageValidator & ImageMetadata
 │       ├── Storage/             # IImageStorage & LocalFileStorage (outside wwwroot)
 │       └── Exceptions/          # ErrorCodes, typed exceptions & GlobalExceptionHandler
 ├── tests/
-│   ├── UnitTests/               # xUnit unit tests (URL, SSRF IP ranges, ImageValidator, Storage, HTML ranking)
+│   ├── UnitTests/               # xUnit unit tests (URL validation, ImageValidator, Storage, HTML ranking)
 │   └── IntegrationTests/        # WebApplicationFactory + local Kestrel MockSupplierServer + Fixtures
 ├── frontend/
 │   └── vehicle-image-dashboard/ # Vite + React dashboard with native lazy loading
@@ -136,7 +135,7 @@ The API currently has no authentication or authorization. Do not expose it publi
 
 ### 4. Run the Test Suites
 
-All unit, integration, and SSRF security tests run against an in-process Kestrel `MockSupplierServer` and local fixtures with zero dependency on external websites:
+All unit, integration, and URL validation tests run against an in-process Kestrel `MockSupplierServer` and local fixtures with zero dependency on external websites:
 
 ```bash
 dotnet test

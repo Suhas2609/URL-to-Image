@@ -8,8 +8,8 @@ This guide teaches the **VehicleImageSystem** (`URL-to-Image`) codebase on branc
 
 ### 1. Core Architectural Purpose
 VehicleImageSystem solves an enterprise ingestion problem: **never trust or hotlink external supplier image URLs at runtime**. When a user submits a vehicle record (either one-by-one via JSON or up to 50 rows via CSV upload), the backend must:
-1. Validate the URL against SSRF and policy rules before opening any socket.
-2. Fetch the target safely (controlling DNS resolution at TCP connect time, following redirects manually, capping timeouts and stream bytes, retrying only safe transient errors).
+1. Validate the URL against basic URL policy rules (`UrlValidator`) before opening any socket.
+2. Fetch the target safely using a configured `SocketsHttpHandler` (`AllowAutoRedirect = false`, `UseCookies = false`, gzip/deflate/brotli decompression, connect timeout), following redirects manually with per-hop URL policy re-validation, capping timeouts and stream bytes, and retrying only safe transient errors.
 3. Handle both direct image URLs and static HTML listing pages without double-fetching via mandatory `HEAD`.
 4. Verify actual binary signatures (`JPEG`, `PNG`, `WebP`), reject spoofing/bombs/corrupted images by full pixel decoding via `SixLabors.ImageSharp`, and compute SHA-256.
 5. Persist an independent copy outside the web root via atomic write-then-move (`LocalFileStorage`).
@@ -20,11 +20,12 @@ VehicleImageSystem solves an enterprise ingestion problem: **never trust or hotl
 Being honest about what **is not** built is as important as explaining what **is** built:
 - **No Authentication / Authorization Middleware Scheme:** `app.UseAuthorization()` is wired in `Program.cs`, and `AddCors("DashboardCors")` allows `localhost:5173` / `127.0.0.1:5173`, but no JWT/cookie/API-key auth handler is registered yet.
 - **No Swagger UI Package:** `AddOpenApi()` + `app.MapOpenApi()` exposes OpenAPI JSON at `/openapi/v1.json` in `Development`, without Swagger UI.
-- **No `IImageRetriever` Polymorphic Strategy Interface:** Earlier commits refactored `DirectImageRetriever` and `HtmlImageRetriever` into concrete scoped classes orchestrated directly by `RetrievalOrchestrator`.
+- **No `IImageRetriever` Polymorphic Strategy Interface:** Earlier commits refactored `DirectImageRetriever`, `HtmlImageRetriever`, and `GoogleDriveImageRetriever` into concrete scoped classes orchestrated directly by `RetrievalOrchestrator`.
+- **Intentional Basic URL Policy Only (No Advanced Network/DNS SSRF Guard):** Earlier iterations included full IPv4/IPv6 CIDR blocklists, DNS pre-resolution, NAT64/6to4/IPv4-mapped decoding, and socket `ConnectCallback` IP pinning (`DestinationValidator`/`SsrfGuardHttpHandler`). Those were removed to keep this controlled portfolio project simple: `UrlValidator` enforces scheme (`http`/`https`), allowed ports (`80`/`443`), length/control characters, no `UserInfo`, valid domain syntax, and blocks `localhost` / loopback IP literals (`127.0.0.1`, `[::1]`). Untrusted public/multi-tenant deployments should pair this with host/VPC egress firewall rules.
 - **No JavaScript Execution Engine (Headless Browser):** `HtmlImageRetriever` parses static HTML using `HtmlAgilityPack`. Single-page apps or anti-bot WAF/JS proof-of-work pages (such as `magnific.com`, which serves HTTP `200 OK` Akamai JS challenge HTML without static `<img>` or `og:image` tags) fail cleanly with `NO_IMAGE_FOUND`.
 - **Synchronous Request Processing (No Background Worker Queue):** Both single vehicle ingestion and CSV bulk import (up to 50 rows, processed sequentially) complete within the HTTP request lifecycle.
 - **No CSV Row Deduplication or Partial Re-run Token:** Identical vehicles in a CSV create separate `Vehicle` rows (`Guid.NewGuid()`). Duplicate column headers inside the CSV *are* rejected as `400 VALIDATION_FAILED`.
-- **No Automated CSV Tests in `tests/` Yet:** The 138 unit + 59 integration tests validate the core pipeline (`DestinationValidator`, `UrlValidator`, `ImageValidator`, `LocalFileStorage`, `HtmlCandidateRanking`, `GlobalExceptionHandler`, `Delivery`, `Direct`, `Html`, `Redirects`, `Replacement`, `SsrfSecurity`, `StreamingLimit`, `VehicleServiceCancellation`). CSV bulk ingestion was verified via build checks and live headless browser runs rather than dedicated xUnit tests.
+- **Automated Test Coverage:** Unit and integration tests cover the core pipeline (`UrlValidator`, `ImageValidator`, `LocalFileStorage`, `HtmlCandidateRanking`, `GlobalExceptionHandler`, `Delivery`, `DirectImageIngestion`, `HtmlExtraction`, `Redirects`, `Replacement`, `UrlValidation`, `StreamingLimit`, `VehicleServiceCancellation`). CSV bulk ingestion and Google Drive retrieval were verified via builds and live API/browser checks.
 
 ---
 
@@ -39,9 +40,9 @@ Read these modules in order; each builds on the previous layer.
   2. `StorageOptions` uses `.PostConfigure(...)` to resolve relative `RootPath` (default `"../../storage"`) relative to `builder.Environment.ContentRootPath` so `LocalFileStorage` always gets a canonical absolute path regardless of working directory.
   3. `ApplicationDbContext` inspects `DatabaseProvider`: `"Sqlite"` uses `UseSqlite`, anything else defaults to `UseSqlServer`. When SQLite is selected, startup executes `db.Database.EnsureCreated()` inside a scope; SQL Server relies on EF Core migrations (`20261116094554_InitialCreate`).
   4. **Service Lifetimes (Critical Interview Topic):**
-     - `Singleton`: `DestinationValidator`, `UrlValidator`, `ImageValidator` (owns a shared `SixLabors.ImageSharp.Configuration` with `MemoryAllocator` pool caps), `IImageStorage -> LocalFileStorage`. None depend on scoped `DbContext`.
-     - `HttpClientFactory` named client (`SsrfGuardHttpHandler.ClientName = "SsrfSafeRetrievalClient"`): sets `client.Timeout = Timeout.InfiniteTimeSpan` so per-request timeouts can be controlled precisely by `DirectImageRetriever`, and configures primary `SocketsHttpHandler` via `SsrfGuardHttpHandler.Create(...)`.
-     - `Scoped`: `DirectImageRetriever`, `HtmlImageRetriever`, `RetrievalOrchestrator`, `ImageIngestionService`, `ImageDeliveryService`, `VehicleService`, `VehicleImportService`.
+     - `Singleton`: `UrlValidator`, `ImageValidator` (owns a shared `SixLabors.ImageSharp.Configuration` with `MemoryAllocator` pool caps), `IImageStorage -> LocalFileStorage`. None depend on scoped `DbContext`.
+     - `HttpClientFactory` named client (`DirectImageRetriever.HttpClientName = "ImageRetrievalClient"`): sets `client.Timeout = Timeout.InfiniteTimeSpan` so per-request timeouts can be controlled precisely by `DirectImageRetriever`, and configures a standard `SocketsHttpHandler` (`AllowAutoRedirect = false`, `UseCookies = false`, `AutomaticDecompression = GZip | Deflate | Brotli`, `ConnectTimeout = 5s`, `PooledConnectionLifetime = 60s`, `MaxResponseHeadersLength = 64`).
+     - `Scoped`: `DirectImageRetriever`, `HtmlImageRetriever`, `GoogleDriveImageRetriever`, `RetrievalOrchestrator`, `ImageIngestionService`, `ImageDeliveryService`, `VehicleService`, `VehicleImportService`.
   5. **Startup Storage Safety Check (`InitializeAndVerifyStorageRoot`):** Runs right after `builder.Build()` before `app.Run()`. Verifies `Storage:RootPath` is **neither equal to nor inside** `wwwroot` (`env.WebRootPath`), creates the folder, and runs `VerifyStorageRootWritable` (opens a `.vehicle-image-write-check-*.tmp` stream with `FileOptions.WriteThrough`, writes 2 bytes `[0x56, 0x49]`, flushes to disk, deletes the probe).
   6. **Middleware Order:** `UseExceptionHandler()` -> (if Development) `MapOpenApi()` -> `UseCors("DashboardCors")` -> `UseAuthorization()` -> `MapHealthChecks("/health")` -> `MapControllers()`. Placing `UseExceptionHandler()` first ensures exceptions in downstream middleware or controllers are formatted consistently.
 
@@ -66,25 +67,23 @@ Read these modules in order; each builds on the previous layer.
   - **Check Constraints (`ToTable`):** `CK_Vehicles_Year` (`1886..2100`), `CK_VehicleImages_FileSize > 0`, `CK_VehicleImages_Width > 0`, `CK_VehicleImages_Height > 0`.
   - **No Partial Rows:** Only `Completed` images get committed on create; failed ingestions return `422` without writing `Vehicle` or `VehicleImage` rows.
 
-### Module 4: SSRF & DNS Rebinding Defense (`Security/*`)
-- **Files:** `UrlValidator.cs`, `DestinationValidator.cs`, `SsrfGuardHttpHandler.cs`.
-- **Why Three Components Are Needed:** Checking a URL string once before calling `HttpClient.GetAsync` leaves two classic vulnerabilities: **open redirects** (public URL `302`s to `http://169.254.169.254/`) and **DNS rebinding / TOCTOU** (first DNS lookup returns `93.184.216.34`, second lookup inside `HttpClient` returns `127.0.0.1`).
-- **Defense Layer 1 — `UrlValidator`:**
-  - Rejects blank strings, lengths `> 2048`, control characters (`char.IsControl`), non-`http`/`https` schemes, embedded credentials (`!string.IsNullOrEmpty(uri.UserInfo)`), non-whitelisted ports (`80`, `443`), banned hostnames (`localhost`, `*.localhost`, `*.local`, `*.internal`), IPv6 scope IDs (`%eth0`), blocked literal IPs, or malformed/non-FQDN IDN hosts (`!asciiHost.Contains('.')`).
-  - `ValidateRedirectTarget(currentUri, locationHeader)` resolves relative redirects (`Uri.TryCreate(currentUri, trimmed, out targetUri)`) and applies the exact same policy.
+### Module 4: URL Policy Validation (`Security/UrlValidator.cs`)
+- **File:** `UrlValidator.cs`.
+- **What `UrlValidator` Checks:**
+  - Rejects `null`/blank strings, lengths `> 2048` (`MaxUrlLength`), control characters (`char.IsControl`), non-`http`/`https` schemes, embedded credentials (`!string.IsNullOrEmpty(uri.UserInfo)`), and non-whitelisted ports (`AllowedPorts`: `80`, `443`).
+  - Rejects `localhost` and `*.localhost` (`UNSAFE_DESTINATION`).
+  - For IPv4/IPv6 literals: parses `IPAddress` and rejects loopback literals (`IPAddress.IsLoopback(ipAddress)` -> `127.0.0.0/8`, `::1` -> `UNSAFE_DESTINATION`).
+  - For hostnames: normalizes internationalized domains via `IdnMapping.GetAscii(uri.DnsSafeHost)` and rejects malformed or single-label hostnames lacking `.` (`!asciiHost.Contains('.')` -> `INVALID_URL`).
+  - `ValidateRedirectTarget(currentUri, locationHeader)` resolves relative redirects (`Uri.TryCreate(currentUri, trimmed, out targetUri)`) and applies the exact same `ValidateUriPolicy` rules on every redirect hop.
   - `RedactForLogging(uri)` strips query parameters and fragments (`uri.GetLeftPart(UriPartial.Path)`) to avoid logging tokens/signed URLs.
-- **Defense Layer 2 — `DestinationValidator`:**
-  - `BlockedNetworks` (`IPNetwork2` structs checking bit-masked prefixes): blocks IPv4 `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `168.63.129.16/32` (Azure wire server), `169.254.0.0/16` (link-local & AWS/GCP/Azure metadata), `172.16.0.0/12`, `192.0.0.0/24`, `192.0.2.0/24`, `192.88.99.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`, `224.0.0.0/4`, `240.0.0.0/4`, plus IPv6 `::/128`, `::1/128`, `100::/64`, `2001::/32`, `2001:2::/48`, `2001:db8::/32`, `fc00::/7`, `fe80::/10`, `ff00::/8`.
-  - **Tunnel/Translation Unwrapping:** Recursively decodes IPv4-mapped IPv6 (`::ffff:127.0.0.1`), IPv4-compatible IPv6 (`::127.0.0.1`), NAT64 (`64:ff9b::/96` and `64:ff9b:1::/48` with reserved byte 8 check), and 6to4 (`2002::/16`) so attackers cannot hide `127.0.0.1` inside IPv6 notation.
-  - `ResolveAndValidateAsync`: rejects host immediately if **any** returned DNS record fails `IsAllowed`.
-- **Defense Layer 3 — `SsrfGuardHttpHandler`:**
-  - Disables automatic redirects (`AllowAutoRedirect = false`), system proxies (`UseProxy = false`), and cookies (`UseCookies = false`).
-  - `ConnectCallback` re-checks port, calls `destinationValidator.ResolveAndValidateAsync(host, ct)` right at TCP connect time, and opens a raw `Socket` directly to each validated `IPAddress` (`socket.ConnectAsync(new IPEndPoint(address, port), connectCts.Token)`), returning `new NetworkStream(socket, ownsSocket: true)`. Because `HttpRequestMessage` still carries the original `Uri`, ASP.NET/.NET still sends the right `Host` header, TLS SNI, and verifies the server X.509 cert against the original hostname—while guaranteeing DNS cannot switch IPs between validation and socket connect!
+- **Boundary / Design Note:** Complex DNS pre-resolution, IPv4/IPv6 private CIDR blocklists, NAT64/6to4/IPv4-mapped decoding, and socket `ConnectCallback` IP pinning (`DestinationValidator` / `SsrfGuardHttpHandler`) were intentionally removed for this controlled portfolio workflow. Untrusted multi-tenant deployments should pair `UrlValidator` with host/VPC egress controls.
 
 ### Module 5: Streaming Retrieval, Redirects, Bounded Reads & Retries (`Retrieval/DirectImageRetriever.cs`, `Models/RetrievedImage.cs`)
+- **HttpClient Registration (`Program.cs`):**
+  - Registers named client `DirectImageRetriever.HttpClientName` (`"ImageRetrievalClient"`) with `client.Timeout = Timeout.InfiniteTimeSpan` and a `SocketsHttpHandler` configured with `AllowAutoRedirect = false`, `UseCookies = false`, `AutomaticDecompression = GZip | Deflate | Brotli`, `ConnectTimeout = 5s`, `PooledConnectionLifetime = 60s`, and `MaxResponseHeadersLength = 64`.
 - **Manual Redirect Loop (`ExecuteSingleFetchAsync`):**
   - Creates a per-attempt linked `CancellationTokenSource` bounded by `Retrieval:TimeoutSeconds` (15s).
-  - Loops `hop = 0` up to `MaxRedirects` (5): calls `ResolveAndValidateAsync` before `SendAsync(..., HttpCompletionOption.ResponseHeadersRead, effectiveToken)`.
+  - Loops `hop = 0` up to `MaxRedirects` (5): calls `SendAsync(..., HttpCompletionOption.ResponseHeadersRead, effectiveToken)`.
   - If status is `301`, `302`, `303`, `307`, `308`: checks `hop >= MaxRedirects` (throws `REDIRECT_LIMIT_EXCEEDED`), calls `_urlValidator.ValidateRedirectTarget`, and continues loop.
   - Otherwise validates `2xx` (`404` -> `HttpNotFound`, `401` -> `HttpUnauthorized`, `403` -> `HttpForbidden`, `429` -> parses `Retry-After` Delta or HTTP Date -> `HttpRateLimited`, `5xx` -> `HttpServerError`, others -> `HttpError`).
 - **Bounded Stream Transfer (`ReadBoundedStreamAsync`):**
@@ -211,7 +210,7 @@ Read these modules in order; each builds on the previous layer.
   - Uses composite React key `key={`${vehicle.id}-${vehicle.imageId}`}` on `<VehicleCard>` so replacing a vehicle's image forces a clean remount of card local state (`imageLoadFailed`, `details`, `showReplaceForm`).
 
 ### Module 14: Dashboard Components, Bulk Import UI & Styling (`src/components/*`, `src/index.css`)
-- **`VehicleForm.jsx`:** Includes 3 quick demo presets (`Porsche 911` Wikipedia HTML page, `BMW M3` direct Wikimedia JPEG, `Audi RS6` AWS metadata SSRF test URL), controlled inputs, `submitting` lock, and structured `feedback-banner`.
+- **`VehicleForm.jsx`:** Includes quick demo presets (`Porsche 911` Wikipedia HTML page, `BMW M3` direct Wikimedia JPEG, `Audi RS6` blocked `http://localhost/car.jpg` URL, plus a public Google Drive URL preset), controlled inputs, `submitting` lock, and structured `feedback-banner`.
 - **`BulkImportForm.jsx` *(New)*:**
   - `SAMPLE_CSV_CONTENT` generates an in-browser `Blob` download (`sample-vehicles.csv`) including a quoted variant (`"Competition, xDrive"`) showcasing RFC 4180 comma escaping.
   - Displays selected filename + formatted size (`selected-file-pill`).
@@ -223,10 +222,10 @@ Read these modules in order; each builds on the previous layer.
   - `ImageReplaceForm` submits `PUT /api/vehicles/{id}/image`; if replacement fails, displays error banner inside the drawer (`Existing image preserved`) without altering the displayed vehicle card image.
 
 ### Module 15: Automated Test Harness & Live Edge-Case Insights (`tests/*`, `magnific.com` Analysis)
-- **`tests/UnitTests` (6 test classes):** Pure unit coverage without network/DB: `DestinationValidatorTests`, `UrlValidatorTests`, `ImageValidatorTests`, `LocalFileStorageTests`, `HtmlCandidateRankingTests`, `GlobalExceptionHandlerTests`.
+- **`tests/UnitTests` (5 test classes):** Pure unit coverage without network/DB: `UrlValidatorTests`, `ImageValidatorTests`, `LocalFileStorageTests`, `HtmlCandidateRankingTests`, `GlobalExceptionHandlerTests`.
 - **`tests/IntegrationTests` (8 test classes + `ApiFactory` + `MockSupplierServer`):**
   - `MockSupplierServer` boots an ephemeral Kestrel server on `127.0.0.1:<randomPort>` serving local `Fixtures/Html/*` and `Fixtures/Images/*`, dynamic chunked oversize streams, redirects, and simulated `429`/`503` flaky routes.
-  - `ApiFactory` overrides `DatabaseProvider` to isolated temp `Sqlite`, `Storage:RootPath` to temp dir, tight timeouts/retry delays, and swaps `DestinationValidator` for `MockServerLoopbackDestinationValidator` (allowing *only* `127.0.0.1` + mock port while keeping all other private/metadata IPs blocked)—except `SsrfSecurityTests`, which sets `useStrictProductionSsrfValidator: true` to test the **real** production validator!
+  - `ApiFactory` overrides `DatabaseProvider` to isolated temp `Sqlite`, `Storage:RootPath` to temp dir, tight timeouts/retry delays, adds the mock server port to `Retrieval:AllowedPorts`, and uses `PostConfigure<HttpClientFactoryOptions>(DirectImageRetriever.HttpClientName, ...)` with a test-only `SocketsHttpHandler` (`UseProxy = false` and `ConnectCallback` routing `supplier.test` -> `127.0.0.1`) so `MockSupplierServer` tests work cleanly without modifying production `UrlValidator` loopback blocking (`UrlValidationTests`).
   - `VehicleServiceCancellationTests` injects a custom EF `DbCommandInterceptor` (`CancelOnCommandInterceptor`) to cancel the token *inside SQL INSERT execution* and assert compensating storage deletion works under real EF Core cancellation.
 - **Why `https://www.magnific.com/free-psd/silver-sedan-car_3993591.htm` Returns `NO_IMAGE_FOUND`:**
   - Inspected behavior during diagnostics: Akamai Bot Manager returns HTTP `200 OK` with a tiny (2,313-byte) HTML JavaScript proof-of-work challenge page containing zero `og:image`, zero `twitter:image`, and zero `<img>` tags. `RetrievalOrchestrator` sees HTTP 200 HTML -> dispatches to `HtmlImageRetriever` -> `ExtractAndRankCandidates` returns `0` candidates -> throws `NO_IMAGE_FOUND` (`422`). This confirms the pipeline behaves cleanly without attempting to bypass anti-bot protections.
@@ -244,16 +243,16 @@ flowchart LR
     Api --> Controllers["VehiclesController & ImagesController"]
     Controllers --> CoreServices["VehicleService / VehicleImportService / ImageDeliveryService"]
     CoreServices --> Ingestion["ImageIngestionService"]
-    Ingestion --> Security["UrlValidator & DestinationValidator"]
-    Ingestion --> Retrieval["RetrievalOrchestrator (Direct & Html)"]
-    Retrieval -->|"SSRF-Guarded SocketsHttpHandler"| Suppliers["External Supplier Web / CDN"]
+    Ingestion --> Security["UrlValidator"]
+    Ingestion --> Retrieval["RetrievalOrchestrator (Direct, Html, GoogleDrive)"]
+    Retrieval -->|"Configured SocketsHttpHandler"| Suppliers["External Supplier Web / CDN"]
     Ingestion --> Validator["ImageValidator (ImageSharp + SHA-256)"]
     Ingestion --> Storage["LocalFileStorage (Outside wwwroot)"]
     CoreServices --> Db["ApplicationDbContext (SQL Server / SQLite)"]
     Controllers -->|"Streams /api/images/{id}"| Storage
 ```
 
-**Explanation:** The browser **never** fetches vehicle images directly from supplier websites. Both single submissions (`POST /api/vehicles`) and CSV bulk imports (`POST /api/vehicles/import`) flow into `ImageIngestionService`, pass through SSRF/DNS validation, HTTP retrieval, binary image validation, and internal disk storage (`LocalFileStorage`), and only expose internal `/api/images/{id}` URLs back to the React dashboard.
+**Explanation:** The browser **never** fetches vehicle images directly from supplier websites. Both single submissions (`POST /api/vehicles`) and CSV bulk imports (`POST /api/vehicles/import`) flow into `ImageIngestionService`, pass through URL policy validation, HTTP retrieval, binary image validation, and internal disk storage (`LocalFileStorage`), and only expose internal `/api/images/{id}` URLs back to the React dashboard.
 
 ---
 
@@ -265,7 +264,7 @@ flowchart TD
     Opts --> PostCfg["PostConfigure Storage:RootPath (resolve against ContentRootPath)"]
     PostCfg --> DbReg["Register ApplicationDbContext (SqlServer or Sqlite)"]
     DbReg --> ExShape["Configure InvalidModelStateResponseFactory + GlobalExceptionHandler"]
-    ExShape --> HttpReg["Register Singletons + Named SsrfSafeRetrievalClient + Scoped Services"]
+    ExShape --> HttpReg["Register Singletons + Named ImageRetrievalClient + Scoped Services"]
     HttpReg --> Build["builder.Build()"]
     Build --> StorageCheck["InitializeAndVerifyStorageRoot (Assert outside wwwroot + WriteThrough Probe)"]
     StorageCheck --> SqliteCheck{"DatabaseProvider == Sqlite?"}
@@ -316,54 +315,38 @@ sequenceDiagram
 
 ---
 
-### Diagram 4: SSRF Multi-Layer Defense Flow
+### Diagram 4: URL Policy Validation Flow (`UrlValidator`)
 
 ```mermaid
 flowchart TD
-    Raw["Raw ImageUrl String"] --> L1["Layer 1: UrlValidator.Validate"]
+    Raw["Raw ImageUrl String"] --> L1["UrlValidator.Validate"]
     L1 -->|"Empty / >2048 chars / Control chars"| FailUrl["Throw INVALID_URL"]
     L1 -->|"Not http/https or has UserInfo"| FailUrl
-    L1 -->|"Port not in {80,443} / .local / .internal / localhost / bad IP literal"| FailSsrf["Throw UNSAFE_DESTINATION"]
-    L1 -->|"IDN FQDN lacks '.'"| FailUrl
-    L1 -->|"Valid Public URI"| L2["Layer 2: Pre-Request DestinationValidator.ResolveAndValidateAsync"]
-    L2 -->|"Any DNS record in BlockedNetworks or IPv6 tunnel"| FailSsrf
-    L2 -->|"DNS missing / error"| FailDns["Throw DNS_RESOLUTION_FAILED"]
-    L2 -->|"All IPs Public"| L3["Layer 3: DirectImageRetriever Redirect Loop"]
-    L3 -->|"301/302/303/307/308"| RedirVal["UrlValidator.ValidateRedirectTarget -> Loop to L2"]
-    L3 -->|"TCP Connect"| L4["Layer 4: SsrfGuardHttpHandler.ConnectCallback"]
-    L4 -->|"Re-check port + fresh DNS lookup + IsAllowed(every IP)"| SocketConnect["Direct Socket.ConnectAsync(IPEndPoint)"]
+    L1 -->|"Port not in {80,443} / localhost / *.localhost / loopback IP"| FailUnsafe["Throw UNSAFE_DESTINATION"]
+    L1 -->|"IDN domain lacks '.' or invalid"| FailUrl
+    L1 -->|"Valid HTTP/HTTPS URI"| L2["DirectImageRetriever (ImageRetrievalClient)"]
+    L2 -->|"301/302/303/307/308"| RedirVal["UrlValidator.ValidateRedirectTarget -> Re-apply policy"]
+    RedirVal -->|"Disallowed scheme / port / localhost / loopback"| FailUnsafe
+    RedirVal -->|"Valid target"| L2
 ```
 
-**Explanation:** Stopping SSRF requires defense across **four** checkpoints: string syntax/scheme/port validation, pre-request DNS check, per-hop redirect validation, and socket-level `ConnectCallback` enforcement that binds the TCP connection strictly to the validated `IPAddress` while leaving TLS SNI and the HTTP `Host` header intact.
+**Explanation:** `UrlValidator` enforces basic structural and destination rules (`http`/`https`, no `UserInfo`, allowed ports `80`/`443`, no `localhost` or loopback IP literals, valid IDN domain syntax) both on initial user input and on every manual redirect `Location` target before opening the next HTTP request.
 
 ---
 
-### Diagram 5: DNS Rebinding & `SocketsHttpHandler.ConnectCallback` Flow
+### Diagram 5: `SocketsHttpHandler` HTTP Safeguards Flow
 
 ```mermaid
-sequenceDiagram
-    participant Ret as DirectImageRetriever
-    participant DV as DestinationValidator
-    participant Handler as SsrfGuardHttpHandler
-    participant DNS as System DNS
-    participant Target as Resolved Socket IP
-
-    Ret->>DV: Pre-check ResolveAndValidateAsync(host)
-    DV->>DNS: Query DNS A/AAAA records
-    DNS-->>DV: 93.184.216.34 (Public IP - Allowed)
-    Ret->>Handler: client.SendAsync(GET https://evil-rebind.example/car.jpg)
-    Note over Handler: Pooling disabled per lifetime; AllowAutoRedirect=false; UseProxy=false
-    Handler->>Handler: ConnectCallback(DnsEndPoint host:port)
-    Handler->>DV: Fresh ResolveAndValidateAsync(host) inside ConnectCallback
-    DV->>DNS: Re-query DNS at TCP connect instant
-    DNS-->>DV: Returns [93.184.216.34, 127.0.0.1] (Rebound to loopback!)
-    DV->>DV: Check ALL returned IPs -> 127.0.0.1 fails IsAllowed()
-    DV-->>Handler: Throw UNSAFE_DESTINATION
-    Handler-->>Ret: Aborts BEFORE Socket.ConnectAsync ever executes!
-    Note over Handler,Target: If all IPs are public, connects Socket directly to validated IPAddress
+flowchart TD
+    Client["HttpClientFactory: DirectImageRetriever.HttpClientName ('ImageRetrievalClient')"] --> H1["AllowAutoRedirect = false (manual loop enforces ValidateRedirectTarget)"]
+    Client --> H2["UseCookies = false (no cross-request cookie leakage)"]
+    Client --> H3["AutomaticDecompression = GZip | Deflate | Brotli"]
+    Client --> H4["ConnectTimeout = 5s & PooledConnectionLifetime = 60s"]
+    Client --> H5["MaxResponseHeadersLength = 64 KB"]
+    H3 --> StreamCap["DirectImageRetriever.ReadBoundedStreamAsync checks total decompressed bytes <= 20 MB"]
 ```
 
-**Explanation:** In a DNS rebinding attack, an attacker serves a public IP (`TTL=0`) during initial validation, then switches the DNS answer to `127.0.0.1` right before the HTTP client connects. Because `SsrfGuardHttpHandler` runs `ResolveAndValidateAsync` inside `ConnectCallback` and passes the exact validated `IPEndPoint` to `Socket.ConnectAsync`, `.NET` never performs an unguarded second DNS lookup.
+**Explanation:** Because `Program.cs` disables auto-redirects and cookies and sets `HttpClient.Timeout = Timeout.InfiniteTimeSpan`, [`DirectImageRetriever`](../../../backend/VehicleImage.Api/Retrieval/DirectImageRetriever.cs) retains complete control over per-attempt timeouts (`15s`), redirect hop validation (`<= 5`), and decompressed download size limits (`20 MB`).
 
 ---
 
@@ -373,19 +356,18 @@ sequenceDiagram
 flowchart TD
     Start["hop = 0, currentUri = validatedSource"] --> LoopCheck{"hop <= MaxRedirects (5)?"}
     LoopCheck -->|"No"| ErrMax["Throw REDIRECT_LIMIT_EXCEEDED"]
-    LoopCheck -->|"Yes"| Resolve["ResolveAndValidateAsync(currentUri.DnsSafeHost)"]
-    Resolve --> Send["HttpClient.SendAsync(GET currentUri, ResponseHeadersRead)"]
+    LoopCheck -->|"Yes"| Send["HttpClient.SendAsync(GET currentUri, ResponseHeadersRead)"]
     Send --> IsRedir{"Status in {301, 302, 303, 307, 308}?"}
     IsRedir -->|"No"| Check2xx["EnsureSuccessOrThrowMappedStatus -> Stream Body"]
     IsRedir -->|"Yes"| HopCap{"hop >= MaxRedirects?"}
     HopCap -->|"Yes"| ErrMax
     HopCap -->|"No"| ReadLoc["Read Location Header"]
     ReadLoc --> ValTarget["currentUri = UrlValidator.ValidateRedirectTarget(currentUri, location)"]
-    ValTarget -->|"Private IP / Bad Scheme / Port / Empty Location"| Fail["Throw INVALID_URL or UNSAFE_DESTINATION"]
-    ValTarget -->|"Valid Public Target"| Inc["hop++"] --> LoopCheck
+    ValTarget -->|"Localhost / Loopback / Bad Scheme / Port / Empty Location"| Fail["Throw INVALID_URL or UNSAFE_DESTINATION"]
+    ValTarget -->|"Valid Target"| Inc["hop++"] --> LoopCheck
 ```
 
-**Explanation:** Because `AllowAutoRedirect = false`, `HttpClient` yields `3xx` responses directly to `DirectImageRetriever`. Note `hop` counts `0..5` (allowing up to 5 redirect transitions, throwing `REDIRECT_LIMIT_EXCEEDED` on the 6th redirect response), and every relative `Location` header is resolved against `currentUri` and fully vetted before the next hop executes.
+**Explanation:** Because `AllowAutoRedirect = false`, `HttpClient` yields `3xx` responses directly to `DirectImageRetriever`. Note `hop` counts `0..5` (allowing up to 5 redirect transitions, throwing `REDIRECT_LIMIT_EXCEEDED` on the 6th redirect response), and every relative `Location` header is resolved against `currentUri` and vetted via `UrlValidator.ValidateRedirectTarget` before the next hop executes.
 
 ---
 
@@ -744,7 +726,7 @@ flowchart LR
 
 1. **Valid Direct JPEG URL Submission (`POST /api/vehicles` -> `201 Created`)**
    - `VehiclesController.Create` validates `[FromBody] CreateVehicleRequest` -> `VehicleService.CreateAsync` -> `ImageIngestionService.IngestAsync`.
-   - `UrlValidator.Validate` accepts `https://cdn.example/car.jpg` -> `DirectImageRetriever.ExecuteSingleFetchAsync` checks DNS via `DestinationValidator`, connects via `SsrfGuardHttpHandler.ConnectCallback`, reads bounded bytes (`<= 20 MB`).
+   - `UrlValidator.Validate` accepts `https://cdn.example/car.jpg` -> `DirectImageRetriever.ExecuteSingleFetchAsync` issues `GET` via `ImageRetrievalClient`, reads bounded bytes (`<= 20 MB`).
    - `RetrievalOrchestrator.IsHtmlResponse` returns `false` -> yields `RetrievedImage` (`Strategy = "Direct"`).
    - `ImageValidator.ValidateAsync` verifies `FF D8 FF` magic bytes, `FF D9` EOI tail, `IdentifyAsync` dimensions (`100..10000`, `<= 50M` pixels, `1` frame), decodes pixels with `LoadAsync<Rgba32>`, hashes SHA-256 -> `LocalFileStorage.SaveAsync` moves temp file to `vehicles/YYYY/MM/guid.jpg` -> `DbContext.SaveChangesAsync` -> `201 Created` returning `/api/images/{imageId}`.
 
@@ -754,7 +736,7 @@ flowchart LR
    - `ImageValidator` inspects the actual PNG bytes, checks `IHDR` dimensions, decodes, saves as `.png`, and returns `201 Created`.
 
 3. **Valid Redirecting Image URL (`301` -> `302` -> Final `.jpg` -> `201 Created`)**
-   - `SsrfGuardHttpHandler` has `AllowAutoRedirect = false`, so `DirectImageRetriever` sees `301`, increments `hop`, calls `UrlValidator.ValidateRedirectTarget` on `Location`, re-runs `DestinationValidator.ResolveAndValidateAsync`, and issues the next `GET`.
+   - `SocketsHttpHandler` has `AllowAutoRedirect = false`, so `DirectImageRetriever` sees `301`, increments `hop`, calls `UrlValidator.ValidateRedirectTarget` on `Location`, and issues the next `GET`.
    - After resolving `302` (`hop = 2 <= 5`), fetches final `200 OK` bytes; `VehicleImage` persists both `SourceUrl` (initial input) and `FinalSourceUrl` (final destination URI).
 
 4. **Static HTML Webpage Containing `og:image` Tag (`201 Created`)**
@@ -782,67 +764,58 @@ flowchart LR
 
 ---
 
-### Category B — Security & SSRF Rejections
+### Category B — URL Policy Rejections
 
-9. **AWS/Cloud Metadata IPv4 Literal Blocked (`http://169.254.169.254/latest/meta-data/` -> `422 UNSAFE_DESTINATION`)**
-   - `UrlValidator.ValidateUriPolicy` sees `UriHostNameType.IPv4` -> parses `169.254.169.254` -> `DestinationValidator.IsAllowed` hits `169.254.0.0/16` in `BlockedNetworks` -> throws `UNSAFE_DESTINATION` before any DNS or TCP socket exists.
+9. **Localhost Hostname Blocked (`http://localhost/car.jpg` -> `422 UNSAFE_DESTINATION`)**
+   - `UrlValidator.ValidateUriPolicy` normalizes host (`normalizedHost == "localhost" || normalizedHost.EndsWith(".localhost")`) and throws `UNSAFE_DESTINATION` before any HTTP client call executes.
 
-10. **Non-Standard Port Rejected (`https://example.com:8443/car.jpg` -> `422 UNSAFE_DESTINATION`)**
-    - `UrlValidator.ValidateUriPolicy` checks `_destinationValidator.IsPortAllowed(8443, [80, 443])` -> returns `false` -> rejects immediately (`Port 8443 is not permitted`).
+10. **Loopback IPv4/IPv6 Literal Blocked (`http://127.0.0.1/car.jpg`, `http://[::1]/car.jpg` -> `422 UNSAFE_DESTINATION`)**
+    - `UrlValidator.ValidateUriPolicy` sees `UriHostNameType.IPv4` / `IPv6` -> parses `IPAddress` -> `IPAddress.IsLoopback(ipAddress)` returns `true` -> throws `UNSAFE_DESTINATION`.
 
-11. **Embedded Credentials Rejected (`https://admin:secret@example.com/car.jpg` -> `422 INVALID_URL`)**
+11. **Non-Standard Port Rejected (`https://example.com:8443/car.jpg` -> `422 UNSAFE_DESTINATION`)**
+    - `UrlValidator.ValidateUriPolicy` checks `_options.AllowedPorts.Contains(8443)` (`[80, 443]`) -> returns `false` -> rejects immediately (`Port 8443 is not permitted.`).
+
+12. **Embedded Credentials Rejected (`https://admin:secret@example.com/car.jpg` -> `422 INVALID_URL`)**
     - `!string.IsNullOrEmpty(uri.UserInfo)` triggers `ImageIngestionException.InvalidUrl`. Note: logged URLs use `RedactForLogging`, and userinfo URLs are never fetched.
 
-12. **Open Redirect to Loopback Blocked (`https://public.example/go` -> `302` -> `http://127.0.0.1/` -> `422 UNSAFE_DESTINATION`)**
-    - Hop 0 succeeds against public server returning `302 Location: http://127.0.0.1/secret`.
-    - `DirectImageRetriever` calls `_urlValidator.ValidateRedirectTarget` -> parses `127.0.0.1` -> fails `BlockedNetworks` (`127.0.0.0/8`) -> aborts with `422 UNSAFE_DESTINATION`.
+13. **Disallowed Scheme Rejected (`file:///etc/passwd`, `ftp://supplier.example/car.jpg` -> `422 INVALID_URL`)**
+    - Scheme check fails (`http` / `https` only) and throws `INVALID_URL` immediately.
 
-13. **DNS Rebinding Caught Inside `ConnectCallback` (`422 UNSAFE_DESTINATION`)**
-    - Pre-request `ResolveAndValidateAsync` sees public IP `93.184.216.34`.
-    - Milliseconds later, DNS flips to `[10.0.0.5]`. When `SocketsHttpHandler` opens a TCP socket, `ConnectCallback` calls `ResolveAndValidateAsync` again, sees `10.0.0.5` is in `10.0.0.0/8`, and throws `UNSAFE_DESTINATION` before calling `Socket.ConnectAsync`.
-
-14. **IPv6 NAT64 / 6to4 / IPv4-Mapped Bypass Blocked (`422 UNSAFE_DESTINATION`)**
-    - Attacker submits `http://[64:ff9b::169.254.169.254]/`, `http://[::ffff:127.0.0.1]/`, or `http://[2002:7f00:0001::]/`.
-    - `DestinationValidator.IsAllowed` decodes the embedded IPv4 address (`TryDecodeNat64EmbeddedAddress`, `MapToIPv4()`, `bytes[0..1] == 0x20, 0x02`) and recursively runs `IsAllowed` -> rejects all three!
-
-15. **Multi-Record DNS Poisoning Caught (`422 UNSAFE_DESTINATION`)**
-    - A hostname resolves to two A records: `[93.184.216.34, 192.168.1.10]`.
-    - `DestinationValidator.ResolveAndValidateAsync` loops over **every** `addr in addresses`; finding one private IP rejects the entire host.
-
-16. **Local Hostname Suffix Blocked (`http://metadata.internal/a.jpg` -> `422 UNSAFE_DESTINATION`)**
-    - `DestinationValidator.IsHostNameAllowed` normalizes trailing dot and lowercase and rejects `localhost`, `*.localhost`, `*.local`, and `*.internal`.
+14. **Open Redirect to Loopback or Disallowed Port Blocked (`https://public.example/go` -> `302` -> `http://127.0.0.1/` or `http://example.com:8080/` -> `422 UNSAFE_DESTINATION`)**
+    - Hop 0 succeeds against public server returning `302 Location: ...`.
+    - `DirectImageRetriever` calls `_urlValidator.ValidateRedirectTarget` -> parses target -> fails `IsLoopback` or `AllowedPorts` -> aborts with `422 UNSAFE_DESTINATION`.
 
 ---
 
 ### Category C — HTTP Limits, Image Validation & Retries
 
-17. **Redirect Chain Exceeds `MaxRedirects = 5` (`422 REDIRECT_LIMIT_EXCEEDED`)**
+15. **Redirect Chain Exceeds `MaxRedirects = 5` (`422 REDIRECT_LIMIT_EXCEEDED`)**
     - Hop 0..5 follow 5 redirects (`hop < 5` continues), and when the 6th redirect response arrives (`hop == 5 >= _retrievalOptions.MaxRedirects`), `DirectImageRetriever` throws `RedirectLimitExceeded(5)`.
 
-18. **Oversized Chunked Stream Without `Content-Length` Aborted Mid-Stream (`422 IMAGE_TOO_LARGE`)**
+16. **Oversized Chunked Stream Without `Content-Length` Aborted Mid-Stream (`422 IMAGE_TOO_LARGE`)**
     - Server streams chunks totaling 25 MB with `Transfer-Encoding: chunked` and no `Content-Length`.
     - `ReadBoundedStreamAsync` tracks `totalRead` per 16 KB read; on the chunk pushing `totalRead > 20,971,520`, throws `IMAGE_TOO_LARGE`, disposes `MemoryStream`, and drops the connection.
 
-19. **PNG Decompression Bomb Caught via `IHDR` Before Decode (`422 IMAGE_DIMENSIONS_EXCEEDED`)**
+17. **PNG Decompression Bomb Caught via `IHDR` Before Decode (`422 IMAGE_DIMENSIONS_EXCEEDED`)**
     - Malicious tiny 1 KB PNG declares `20000 x 20000` (`400M` pixels) in `IHDR` bytes `16..23`.
     - `ImageValidator.ValidateAsync` inspects `BinaryPrimitives.ReadInt32BigEndian` on bytes `16..23` immediately and throws `IMAGE_DIMENSIONS_EXCEEDED` before allocating pixel buffers.
 
-20. **Disguised SVG Renamed `.jpg` Rejected (`422 UNSUPPORTED_CONTENT_TYPE`)**
+18. **Disguised SVG Renamed `.jpg` Rejected (`422 UNSUPPORTED_CONTENT_TYPE`)**
     - `https://supplier.test/car.jpg` returns `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`.
     - `ImageValidator.InspectSignature` does not match binary magic bytes; sees `<` / `<svg` in trimmed UTF-8 text and throws `UNSUPPORTED_CONTENT_TYPE`.
 
-21. **GIF / BMP / AVIF Image Rejected (`422 UNSUPPORTED_IMAGE_FORMAT`)**
+19. **GIF / BMP / AVIF Image Rejected (`422 UNSUPPORTED_IMAGE_FORMAT`)**
     - Server returns valid `GIF89a`, `BM`, or `ftypavif` bytes. `InspectSignature` identifies the unsupported format explicitly (`"GIF"`, `"BMP"`, `"AVIF/HEIF"`) and throws `UNSUPPORTED_IMAGE_FORMAT` (never retried).
 
-22. **Truncated JPEG Missing `FF D9` EOI Marker Rejected & Retried (`422 IMAGE_DECODE_FAILED`)**
+20. **Truncated JPEG Missing `FF D9` EOI Marker Rejected & Retried (`422 IMAGE_DECODE_FAILED`)**
     - A JPEG starts with `FF D8 FF` but drops halfway through transfer (last 16 bytes lack `FF D9`).
     - `HasValidJpegEndOfImage` returns `false`, throwing `IMAGE_DECODE_FAILED`. Note: `DirectImageRetriever` doesn't catch `ImageValidator` failures (only `DirectImageRetriever` HTTP retries loop inside `FetchWithRetriesAsync`), so `ImageValidator`'s exception flows up with `retryable: true` in `ImageFailureResponse` so the client can safely retry.
 
-23. **Soft-404 HTML Error Page Returning HTTP `200 OK` (`422 NO_IMAGE_FOUND`)**
+21. **Soft-404 HTML Error Page Returning HTTP `200 OK` (`422 NO_IMAGE_FOUND`)**
     - Supplier returns `200 OK` HTML with `<title>404 Not Found - Dealer Portal</title>` plus header/footer logo `<img>` elements.
     - `HtmlImageRetriever.IsHtmlErrorPage` detects `"404 not found"` in `<title>`, returns `[]`, and `RetrieveCandidatesFromHtmlAsync` throws `NO_IMAGE_FOUND`.
 
-24. **Upstream `429` Rate Limit With Short vs Long `Retry-After`**
+22. **Upstream `429` Rate Limit With Short vs Long `Retry-After`**
     - Short `Retry-After: 1` (`<= MaxRetryAfterSeconds = 3`): `ShouldRetry` pauses `1s` via `Task.Delay` and retries up to 3 attempts; succeeds if attempt 2/3 returns `200 OK`.
     - Long `Retry-After: 30` (`> 3s`): `ShouldRetry` returns `false` immediately -> returns `422 HTTP_RATE_LIMITED` with `Retry-After: 30` and `retryable: true`.
 
@@ -850,30 +823,30 @@ flowchart LR
 
 ### Category D — Persistence, Compensation, Replacement & Delivery
 
-25. **Database Failure After File Saved Triggers Compensating Delete (`500 DATABASE_PERSISTENCE_FAILED`)**
+23. **Database Failure After File Saved Triggers Compensating Delete (`500 DATABASE_PERSISTENCE_FAILED`)**
     - `ImageIngestionService.IngestAsync` writes `vehicles/2026/11/xyz.jpg`.
     - `_dbContext.SaveChangesAsync` throws `DbUpdateException` (e.g., SQL constraint or DB offline).
     - `VehicleService.CreateAsync` catches `Exception`, calls `CompensateFileDeleteAsync("vehicles/2026/11/xyz.jpg")` with `CancellationToken.None`, deletes the file, and throws `DatabasePersistenceFailed` (`500`).
 
-26. **Client Aborts HTTP Request During Persistence (`499` + File Deleted)**
+24. **Client Aborts HTTP Request During Persistence (`499` + File Deleted)**
     - Client disconnects while `SaveChangesAsync` is running (`HttpContext.RequestAborted` fires).
     - `VehicleService.CreateAsync` catches `OperationCanceledException`, calls `CompensateFileDeleteAsync` with `CancellationToken.None`, removes the newly stored disk file, and rethrows; `GlobalExceptionHandler` logs nothing noisy and sets HTTP `499`.
 
-27. **Safe Image Replacement (`PUT /api/vehicles/{id}/image` -> `200 OK`)**
+25. **Safe Image Replacement (`PUT /api/vehicles/{id}/image` -> `200 OK`)**
     - Captures `previousImageId` and `previousStorageKey`.
     - Ingests new image into a brand-new `ImageId` + `StorageKey`.
     - Inside explicit DB transaction: verifies `vehicle.Image?.Id == previousImageId`, removes old `VehicleImage` + `SaveChangesAsync`, adds new `VehicleImage` + `SaveChangesAsync`, commits transaction, then deletes `previousStorageKey`.
     - Returns new `ImageUrl: /api/images/{newImageId}` (`200 OK`). Old cached `/api/images/{oldId}` browsers aren't poisoned because the ID changed.
 
-28. **Failed Image Replacement Preserves Existing Image (`422` -> Old Image Intact)**
+26. **Failed Image Replacement Preserves Existing Image (`422` -> Old Image Intact)**
     - `PUT /api/vehicles/{id}/image` supplies an unreachable or non-image URL.
     - `IngestAsync` fails *before* any DB transaction begins; existing `VehicleImage` row and disk file remain completely untouched (`Existing image preserved` shown in `ImageReplaceForm`).
 
-29. **Concurrent Replacement Race (`409 CONCURRENT_UPDATE`)**
+27. **Concurrent Replacement Race (`409 CONCURRENT_UPDATE`)**
     - Two admins submit `PUT /api/vehicles/{id}/image` simultaneously for the same vehicle.
     - Admin A commits first (`vehicle.Image.Id` changes). Admin B's transaction checks `vehicle.Image?.Id != previousImageId`, rolls back, deletes Admin B's newly uploaded temp blob via `CompensateFileDeleteAsync`, and throws `ConcurrentUpdateException` -> `409 CONCURRENT_UPDATE` (`retryable: true`).
 
-30. **Internal Image Delivery & Sanitized Download (`GET /api/images/{id}` & `/download`)**
+28. **Internal Image Delivery & Sanitized Download (`GET /api/images/{id}` & `/download`)**
     - `ImageDeliveryService.OpenImageAsync` verifies DB record + file on disk (`FileNotFoundException` logs `"Data integrity error"` and returns `404 IMAGE_NOT_FOUND`).
     - Sets `X-Content-Type-Options: nosniff`, `Cache-Control: public, max-age=31536000, immutable`, `Content-Length`, and for `/download` computes sanitized `{make}-{model}-{year}-{shortGuid}{ext}`.
 
@@ -881,16 +854,16 @@ flowchart LR
 
 ### Category E — CSV Bulk Ingestion & React Integration
 
-31. **Whole-File CSV Rejection Before Any Network/DB Work (`400 VALIDATION_FAILED`)**
+29. **Whole-File CSV Rejection Before Any Network/DB Work (`400 VALIDATION_FAILED`)**
     - User uploads a `.txt` file, empty file, file `> 1 MB`, CSV missing required header `Year`, CSV with duplicate header `Make,Make`, CSV with `51` non-empty rows, or CSV with an unterminated quote on row 4.
     - `VehicleImportService.ValidateFile` / `ParseAsync` throws `ValidationException` -> `GlobalExceptionHandler` returns `400 VALIDATION_FAILED`. Zero outbound HTTP requests and zero DB inserts occur.
 
-32. **Mixed-Success CSV Upload (`POST /api/vehicles/import` -> `200 OK`) + Frontend Refresh**
+30. **Mixed-Success CSV Upload (`POST /api/vehicles/import` -> `200 OK`) + Frontend Refresh**
     - User selects a 4-row CSV:
       - Row 2 (data row 1): Valid Wikipedia URL with quoted variant `"GTS, AWD"` -> succeeds (`201`-equivalent persistence via `VehicleService.CreateAsync`), `RowNumber: 2, Success: true, ImageUrl: "/api/images/..."`.
       - Row 3 (data row 2): Blank row `,,,,` -> skipped silently by `ParseAsync` (`record.All(string.IsNullOrWhiteSpace)`).
       - Row 4 (data row 3): Invalid year `"not-a-year"` -> caught upfront by `BuildRow`, fails immediately in `ProcessRowAsync` with `ErrorCode: "VALIDATION_FAILED"` (0 network calls).
-      - Row 5 (data row 4): `http://169.254.169.254/` -> `VehicleService.CreateAsync` throws `ImageIngestionException(UNSAFE_DESTINATION)` -> caught by `ProcessRowAsync`, logged, recorded as `Success: false, ErrorCode: "UNSAFE_DESTINATION"`.
+      - Row 5 (data row 4): `http://localhost/car.jpg` -> `VehicleService.CreateAsync` throws `ImageIngestionException(UNSAFE_DESTINATION)` -> caught by `ProcessRowAsync`, logged, recorded as `Success: false, ErrorCode: "UNSAFE_DESTINATION"`.
       - Row 6 (data row 5): Valid direct Wikimedia image -> processed in a **fresh `AsyncServiceScope`** (`DbContext` unaffected by previous rows), succeeds cleanly.
     - Backend returns `200 OK` `{ totalRows: 4, successfulRows: 2, failedRows: 2, results: [...] }` with zero external URLs.
     - `BulkImportForm.jsx` clears selected file, renders 3 summary stat boxes (`4`, `2`, `2`) + row cards, and invokes `onImportCompleted` -> `DashboardPage.jsx` resets to page 1 and fetches `GET /api/vehicles?page=1&pageSize=12` so both newly imported vehicles render via internal `/api/images/{id}`.

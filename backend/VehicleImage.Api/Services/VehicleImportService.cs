@@ -14,7 +14,7 @@ namespace VehicleImage.Api.Services;
 /// <summary>
 /// Imports vehicles from a CSV file. Parsing and row validation happen up front; each valid row
 /// is then created sequentially through <see cref="IVehicleService.CreateAsync"/>, which already
-/// owns image ingestion (SSRF protection, retrieval, validation, storage), persistence and the
+/// owns image ingestion (URL validation, retrieval, image validation, storage), persistence and the
 /// compensating file delete on persistence failure.
 /// </summary>
 public sealed class VehicleImportService : IVehicleImportService

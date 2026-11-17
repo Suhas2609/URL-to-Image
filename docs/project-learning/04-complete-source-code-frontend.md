@@ -146,7 +146,7 @@ export default function App() {
             </p>
           </div>
           <div className="security-summary-bar" aria-label="Active pipeline protections">
-            <span className="security-chip">SSRF ConnectGuard</span>
+            <span className="security-chip">URL Policy Validation</span>
             <span className="security-chip">20 MB Stream Cap</span>
             <span className="security-chip">Magic-Byte &amp; Pixel Decode</span>
             <span className="security-chip">Immutable Internal Delivery</span>
@@ -469,12 +469,12 @@ const DEMO_PRESETS = [
   },
   {
     id: 'preset-vehicle-c',
-    label: 'Vehicle C: SSRF / Blocked URL',
+    label: 'Vehicle C: Blocked Localhost URL',
     make: 'Audi',
     model: 'RS6 Avant',
     variant: 'Performance',
     year: 2026,
-    imageUrl: 'http://169.254.169.254/latest/meta-data/'
+    imageUrl: 'http://localhost/car.jpg'
   }
 ];
 
@@ -543,7 +543,7 @@ export default function VehicleForm({ onVehicleCreated }) {
         Submit Supplier Vehicle &amp; Image URL
       </h2>
       <p className="panel-description">
-        Fetches via SSRF-guarded streaming, validates magic bytes &amp; decoded dimensions, and persists internally.
+        Fetches via bounded HTTP streaming, validates magic bytes &amp; decoded dimensions, and persists internally.
       </p>
 
       <div className="preset-group">

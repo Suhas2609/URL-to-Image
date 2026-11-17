@@ -65,7 +65,6 @@ public class RedirectTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData("/redirect/to-private")]
     [InlineData("/redirect/to-localhost")]
     public async Task CreateVehicle_RedirectToUnsafeDestination_Returns422UnsafeDestination(string path)
     {

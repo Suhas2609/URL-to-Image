@@ -13,7 +13,7 @@ export default function App() {
             </p>
           </div>
           <div className="security-summary-bar" aria-label="Active pipeline protections">
-            <span className="security-chip">SSRF ConnectGuard</span>
+            <span className="security-chip">URL Policy Validation</span>
             <span className="security-chip">20 MB Stream Cap</span>
             <span className="security-chip">Magic-Byte &amp; Pixel Decode</span>
             <span className="security-chip">Immutable Internal Delivery</span>

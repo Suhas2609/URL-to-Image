@@ -1,9 +1,9 @@
-# Complete Backend Source Code Appendix (`feature/csv-bulk-import`)
+# Complete Backend Source Code Appendix
 
-This appendix contains the complete, verbatim, unabbreviated source code of all **51 runtime, configuration, entity, migration, security, retrieval, validation, storage, service, and controller files** in `backend/VehicleImage.Api/` on branch `feature/csv-bulk-import` (`49e9d84`).
+This appendix contains the runtime, configuration, entity, migration, security, retrieval, validation, storage, service, and controller files in `backend/VehicleImage.Api/`.
 
 > [!NOTE]
-> Auto-generated EF Core metadata snapshots (`Migrations/20261116094554_InitialCreate.Designer.cs` and `Migrations/ApplicationDbContextModelSnapshot.cs`) and the default Visual Studio scratch request template (`VehicleImage.Api.http`) are excluded here to keep focus on active runtime code (they remain cataloged in [`02-complete-project-directory-and-file-reference.md`](./02-complete-project-directory-and-file-reference.md)).
+> Auto-generated EF Core metadata snapshots (`Migrations/20261116094554_InitialCreate.Designer.cs` and `Migrations/ApplicationDbContextModelSnapshot.cs`) and the default Visual Studio scratch request template (`VehicleImage.Api.http`) are excluded here to keep focus on active runtime code (they remain cataloged in [`02-complete-project-directory-and-file-reference.md`](./02-complete-project-directory-and-file-reference.md)). For the later `GoogleDriveImageRetriever.cs` addition and flow, see [`07-google-drive-image-retrieval-service-and-flow.md`](./07-google-drive-image-retrieval-service-and-flow.md).
 
 ## Table of Contents
 
@@ -17,7 +17,7 @@ This appendix contains the complete, verbatim, unabbreviated source code of all 
 8. `backend/VehicleImage.Api/Configuration/ImageValidationOptions.cs` — Configuration Option: ImageValidationOptions
 9. `backend/VehicleImage.Api/Configuration/HtmlExtractionOptions.cs` — Configuration Option: HtmlExtractionOptions
 10. `backend/VehicleImage.Api/Configuration/RetryOptions.cs` — Configuration Option: RetryOptions
-11. `backend/VehicleImage.Api/Configuration/BulkImportOptions.cs` — Configuration Option: BulkImportOptions (New on feature/csv-bulk-import)
+11. `backend/VehicleImage.Api/Configuration/BulkImportOptions.cs` — Configuration Option: BulkImportOptions
 12. `backend/VehicleImage.Api/Exceptions/ErrorCodes.cs` — Canonical Error Codes
 13. `backend/VehicleImage.Api/Exceptions/ImageIngestionException.cs` — Typed Ingestion Exception
 14. `backend/VehicleImage.Api/Exceptions/ResourceNotFoundException.cs` — Resource Not Found Exception (404)
@@ -29,7 +29,7 @@ This appendix contains the complete, verbatim, unabbreviated source code of all 
 20. `backend/VehicleImage.Api/DTOs/Vehicles/ReplaceVehicleImageRequest.cs` — Replace Vehicle Image Request DTO
 21. `backend/VehicleImage.Api/DTOs/Vehicles/ImageSubmissionResponse.cs` — Image Submission Success DTO
 22. `backend/VehicleImage.Api/DTOs/Vehicles/VehicleResponse.cs` — Vehicle Catalog Read DTO
-23. `backend/VehicleImage.Api/DTOs/Vehicles/VehicleImportResponse.cs` — CSV Bulk Import Response DTOs (New on feature/csv-bulk-import)
+23. `backend/VehicleImage.Api/DTOs/Vehicles/VehicleImportResponse.cs` — CSV Bulk Import Response DTOs
 24. `backend/VehicleImage.Api/Entities/Vehicle.cs` — Vehicle Domain Entity
 25. `backend/VehicleImage.Api/Entities/VehicleImage.cs` — VehicleImage Domain Entity & ImageStatus Enum
 26. `backend/VehicleImage.Api/Data/ApplicationDbContext.cs` — EF Core ApplicationDbContext
@@ -38,26 +38,24 @@ This appendix contains the complete, verbatim, unabbreviated source code of all 
 29. `backend/VehicleImage.Api/Migrations/20261116094554_InitialCreate.cs` — Initial EF Core Migration
 30. `backend/VehicleImage.Api/Models/RetrievedImage.cs` — RetrievedImage Disposable Stream Model
 31. `backend/VehicleImage.Api/Models/IngestedImage.cs` — IngestedImage Handoff Model
-32. `backend/VehicleImage.Api/Security/DestinationValidator.cs` — SSRF Destination & CIDR Validator
-33. `backend/VehicleImage.Api/Security/UrlValidator.cs` — URL Policy & Redirect Target Validator
-34. `backend/VehicleImage.Api/Security/SsrfGuardHttpHandler.cs` — SSRF-Guarded SocketsHttpHandler
-35. `backend/VehicleImage.Api/Retrieval/DirectImageRetriever.cs` — Direct HTTP Retriever, Manual Redirects & Retry Loop
-36. `backend/VehicleImage.Api/Retrieval/HtmlImageRetriever.cs` — Static HTML Candidate Extractor & Ranker
-37. `backend/VehicleImage.Api/Retrieval/RetrievalOrchestrator.cs` — Single-GET Sniffing Retrieval Orchestrator
-38. `backend/VehicleImage.Api/ImageProcessing/ImageMetadata.cs` — Validated Image Metadata Models
-39. `backend/VehicleImage.Api/ImageProcessing/ImageValidator.cs` — ImageSharp Magic-Byte, Bomb & Full Pixel Validator
-40. `backend/VehicleImage.Api/Storage/IImageStorage.cs` — Internal Storage Abstraction
-41. `backend/VehicleImage.Api/Storage/LocalFileStorage.cs` — Traversal-Safe Atomic Local Disk Storage
-42. `backend/VehicleImage.Api/Services/IImageIngestionService.cs` — Image Ingestion Service Contract
-43. `backend/VehicleImage.Api/Services/ImageIngestionService.cs` — Image Ingestion Service
-44. `backend/VehicleImage.Api/Services/IVehicleService.cs` — Vehicle Lifecycle Service Contract
-45. `backend/VehicleImage.Api/Services/VehicleService.cs` — Vehicle Persistence & Safe Replacement Service
-46. `backend/VehicleImage.Api/Services/IImageDeliveryService.cs` — Image Delivery Service Contract
-47. `backend/VehicleImage.Api/Services/ImageDeliveryService.cs` — Image Delivery Service
-48. `backend/VehicleImage.Api/Services/IVehicleImportService.cs` — CSV Bulk Import Service Contract (New on feature/csv-bulk-import)
-49. `backend/VehicleImage.Api/Services/VehicleImportService.cs` — CSV Bulk Import Service (New on feature/csv-bulk-import)
-50. `backend/VehicleImage.Api/Controllers/VehiclesController.cs` — Vehicles API Controller (Modified on feature/csv-bulk-import)
-51. `backend/VehicleImage.Api/Controllers/ImagesController.cs` — Internal Images API Controller
+32. `backend/VehicleImage.Api/Security/UrlValidator.cs` — URL Policy & Redirect Target Validator
+33. `backend/VehicleImage.Api/Retrieval/DirectImageRetriever.cs` — Direct HTTP Retriever, Manual Redirects & Retry Loop
+34. `backend/VehicleImage.Api/Retrieval/HtmlImageRetriever.cs` — Static HTML Candidate Extractor & Ranker
+35. `backend/VehicleImage.Api/Retrieval/RetrievalOrchestrator.cs` — Single-GET Sniffing Retrieval Orchestrator
+36. `backend/VehicleImage.Api/ImageProcessing/ImageMetadata.cs` — Validated Image Metadata Models
+37. `backend/VehicleImage.Api/ImageProcessing/ImageValidator.cs` — ImageSharp Magic-Byte, Bomb & Full Pixel Validator
+38. `backend/VehicleImage.Api/Storage/IImageStorage.cs` — Internal Storage Abstraction
+39. `backend/VehicleImage.Api/Storage/LocalFileStorage.cs` — Traversal-Safe Atomic Local Disk Storage
+40. `backend/VehicleImage.Api/Services/IImageIngestionService.cs` — Image Ingestion Service Contract
+41. `backend/VehicleImage.Api/Services/ImageIngestionService.cs` — Image Ingestion Service
+42. `backend/VehicleImage.Api/Services/IVehicleService.cs` — Vehicle Lifecycle Service Contract
+43. `backend/VehicleImage.Api/Services/VehicleService.cs` — Vehicle Persistence & Safe Replacement Service
+44. `backend/VehicleImage.Api/Services/IImageDeliveryService.cs` — Image Delivery Service Contract
+45. `backend/VehicleImage.Api/Services/ImageDeliveryService.cs` — Image Delivery Service
+46. `backend/VehicleImage.Api/Services/IVehicleImportService.cs` — CSV Bulk Import Service Contract
+47. `backend/VehicleImage.Api/Services/VehicleImportService.cs` — CSV Bulk Import Service
+48. `backend/VehicleImage.Api/Controllers/VehiclesController.cs` — Vehicles API Controller
+49. `backend/VehicleImage.Api/Controllers/ImagesController.cs` — Internal Images API Controller
 
 ---
 
@@ -225,7 +223,7 @@ This appendix contains the complete, verbatim, unabbreviated source code of all 
 ## 5. Application Composition Root & Middleware Pipeline
 
 **File:** `backend/VehicleImage.Api/Program.cs`  
-**Purpose:** Binds and validates all 6 configuration option classes at startup, registers SQL Server/SQLite DbContext, shapes ModelState errors into 400 ImageFailureResponse, registers singletons/named SSRF HttpClient/scoped services, verifies Storage:RootPath is outside wwwroot and writable, and wires middleware.
+**Purpose:** Binds and validates all 6 configuration option classes at startup, registers SQL Server/SQLite DbContext, shapes ModelState errors into 400 ImageFailureResponse, registers singletons/named HttpClient (`ImageRetrievalClient`)/scoped services, verifies Storage:RootPath is outside wwwroot and writable, and wires middleware.
 
 ```csharp
 using System.Diagnostics;
@@ -336,26 +334,33 @@ builder.Services.AddControllers()
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
-// 4. Security singletons and SSRF-safe HttpClient
-builder.Services.AddSingleton<DestinationValidator>();
+// 4. Validation, storage singletons and HttpClient
 builder.Services.AddSingleton<UrlValidator>();
 builder.Services.AddSingleton<ImageValidator>();
 builder.Services.AddSingleton<IImageStorage, LocalFileStorage>();
 
-builder.Services.AddHttpClient(SsrfGuardHttpHandler.ClientName, client =>
+builder.Services.AddHttpClient(DirectImageRetriever.HttpClientName, client =>
 {
     client.Timeout = Timeout.InfiniteTimeSpan; // Enforced per-request by DirectImageRetriever
 })
 .ConfigurePrimaryHttpMessageHandler(sp =>
 {
-    var destinationValidator = sp.GetRequiredService<DestinationValidator>();
     var retrievalOptions = sp.GetRequiredService<IOptions<RetrievalOptions>>().Value;
-    return SsrfGuardHttpHandler.Create(destinationValidator, retrievalOptions);
+    return new System.Net.Http.SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate | System.Net.DecompressionMethods.Brotli,
+        ConnectTimeout = TimeSpan.FromSeconds(retrievalOptions.ConnectTimeoutSeconds),
+        PooledConnectionLifetime = TimeSpan.FromSeconds(retrievalOptions.PooledConnectionLifetimeSeconds),
+        MaxResponseHeadersLength = 64
+    };
 });
 
 // 5. Retrieval and application services
 builder.Services.AddScoped<DirectImageRetriever>();
 builder.Services.AddScoped<HtmlImageRetriever>();
+builder.Services.AddScoped<GoogleDriveImageRetriever>();
 builder.Services.AddScoped<RetrievalOrchestrator>();
 builder.Services.AddScoped<ImageIngestionService>();
 builder.Services.AddScoped<IImageIngestionService>(sp => sp.GetRequiredService<ImageIngestionService>());
@@ -680,7 +685,7 @@ public sealed class BulkImportOptions
 ## 12. Canonical Error Codes
 
 **File:** `backend/VehicleImage.Api/Exceptions/ErrorCodes.cs`  
-**Purpose:** Central static catalog of 27 UPPER_SNAKE_CASE error codes shared across validation, SSRF, HTTP, image decoding, storage, database, and CSV row results.
+**Purpose:** Central static catalog of 29 UPPER_SNAKE_CASE error codes shared across validation, URL policy, HTTP, Google Drive retrieval, image decoding, storage, database, and CSV row results.
 
 ```csharp
 namespace VehicleImage.Api.Exceptions;
@@ -708,6 +713,8 @@ public static class ErrorCodes
     public const string ImageTooSmall = "IMAGE_TOO_SMALL";
     public const string ImageDecodeFailed = "IMAGE_DECODE_FAILED";
     public const string NoImageFound = "NO_IMAGE_FOUND";
+    public const string UnsupportedSource = "UNSUPPORTED_SOURCE";
+    public const string ProviderAuthRequired = "PROVIDER_AUTH_REQUIRED";
     public const string StorageFailed = "STORAGE_FAILED";
     public const string DatabasePersistenceFailed = "DATABASE_PERSISTENCE_FAILED";
     public const string VehicleNotFound = "VEHICLE_NOT_FOUND";
@@ -1547,285 +1554,10 @@ public sealed record IngestedImage(
 );
 ```
 
-## 32. SSRF Destination & CIDR Validator
-
-**File:** `backend/VehicleImage.Api/Security/DestinationValidator.cs`  
-**Purpose:** Maintains IPv4/IPv6 CIDR blocklists, unwraps IPv4-mapped/IPv4-compatible/NAT64/6to4 IPv6 addresses, filters local hostnames, and rejects hosts if any resolved DNS IP is non-public.
-
-```csharp
-using System.Net;
-using System.Net.Sockets;
-using VehicleImage.Api.Exceptions;
-
-namespace VehicleImage.Api.Security;
-
-public class DestinationValidator
-{
-    private static readonly IPNetwork2[] BlockedNetworks =
-    [
-        // IPv4 blocked ranges (Section 10.1)
-        IPNetwork2.Parse("0.0.0.0", 8),          // "This" network
-        IPNetwork2.Parse("10.0.0.0", 8),         // RFC 1918 private
-        IPNetwork2.Parse("100.64.0.0", 10),      // Carrier-grade NAT (RFC 6598)
-        IPNetwork2.Parse("127.0.0.0", 8),        // Loopback
-        IPNetwork2.Parse("168.63.129.16", 32),   // Azure platform wire server
-        IPNetwork2.Parse("169.254.0.0", 16),     // Link-local & cloud metadata (169.254.169.254)
-        IPNetwork2.Parse("172.16.0.0", 12),      // RFC 1918 private
-        IPNetwork2.Parse("192.0.0.0", 24),       // IETF protocol assignments
-        IPNetwork2.Parse("192.0.2.0", 24),       // TEST-NET-1 documentation
-        IPNetwork2.Parse("192.88.99.0", 24),     // 6to4 relay anycast
-        IPNetwork2.Parse("192.168.0.0", 16),     // RFC 1918 private
-        IPNetwork2.Parse("198.18.0.0", 15),      // Network benchmark tests
-        IPNetwork2.Parse("198.51.100.0", 24),    // TEST-NET-2 documentation
-        IPNetwork2.Parse("203.0.113.0", 24),    // TEST-NET-3 documentation
-        IPNetwork2.Parse("224.0.0.0", 4),        // Multicast
-        IPNetwork2.Parse("240.0.0.0", 4),        // Reserved for future use & broadcast (255.255.255.255)
-
-        // IPv6 blocked ranges (Section 10.1)
-        IPNetwork2.Parse("::", 128),             // Unspecified
-        IPNetwork2.Parse("::1", 128),            // Loopback
-        IPNetwork2.Parse("100::", 64),           // Discard-only (RFC 6666)
-        IPNetwork2.Parse("2001::", 32),          // Teredo tunneling
-        IPNetwork2.Parse("2001:2::", 48),        // Benchmarking
-        IPNetwork2.Parse("2001:db8::", 32),      // Documentation
-        IPNetwork2.Parse("fc00::", 7),           // Unique local address (ULA)
-        IPNetwork2.Parse("fe80::", 10),          // Link-local
-        IPNetwork2.Parse("ff00::", 8)            // Multicast
-    ];
-
-    private readonly Func<string, CancellationToken, ValueTask<IPAddress[]>> _dnsResolver;
-
-    public DestinationValidator()
-        : this( static (host, ct) => new ValueTask<IPAddress[]>(Dns.GetHostAddressesAsync(host, ct)) )
-    {
-    }
-
-    public DestinationValidator(Func<string, CancellationToken, ValueTask<IPAddress[]>> dnsResolver)
-    {
-        _dnsResolver = dnsResolver ?? throw new ArgumentNullException(nameof(dnsResolver));
-    }
-
-    public virtual bool IsPortAllowed(int port, IReadOnlyCollection<int> configuredPorts)
-    {
-        return configuredPorts.Contains(port);
-    }
-
-    public virtual bool IsHostNameAllowed(string host)
-    {
-        if (string.IsNullOrWhiteSpace(host))
-        {
-            return false;
-        }
-
-        string normalized = host.Trim().TrimEnd('.').ToLowerInvariant();
-        if (normalized == "localhost" ||
-            normalized.EndsWith(".localhost", StringComparison.Ordinal) ||
-            normalized.EndsWith(".local", StringComparison.Ordinal) ||
-            normalized.EndsWith(".internal", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return true;
-    }
-
-    public virtual bool IsAllowed(IPAddress address)
-    {
-        ArgumentNullException.ThrowIfNull(address);
-
-        if (address.IsIPv4MappedToIPv6)
-        {
-            return IsAllowed(address.MapToIPv4());
-        }
-
-        if (address.AddressFamily == AddressFamily.InterNetworkV6)
-        {
-            byte[] bytes = address.GetAddressBytes();
-
-            // Check IPv4-compatible IPv6 (::w.x.y.z /96, excluding :: and ::1 which are caught below)
-            bool isIpv4Compatible = true;
-            for (int i = 0; i < 12; i++)
-            {
-                if (bytes[i] != 0)
-                {
-                    isIpv4Compatible = false;
-                    break;
-                }
-            }
-            if (isIpv4Compatible && (bytes[12] != 0 || bytes[13] != 0 || bytes[14] != 0 || bytes[15] > 1))
-            {
-                var embeddedV4 = new IPAddress(new ReadOnlySpan<byte>(bytes, 12, 4));
-                return IsAllowed(embeddedV4);
-            }
-
-            if (TryDecodeNat64EmbeddedAddress(bytes, out var embeddedNat64))
-            {
-                return IsAllowed(embeddedNat64);
-            }
-
-            // Check 6to4 prefix 2002::/16 -> bytes 2..5 are the embedded IPv4 address
-            if (bytes[0] == 0x20 && bytes[1] == 0x02)
-            {
-                var embeddedV4 = new IPAddress(new ReadOnlySpan<byte>(bytes, 2, 4));
-                return IsAllowed(embeddedV4);
-            }
-        }
-
-        foreach (var network in BlockedNetworks)
-        {
-            if (network.Contains(address))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool TryDecodeNat64EmbeddedAddress(byte[] bytes, out IPAddress embeddedAddress)
-    {
-        embeddedAddress = null!;
-
-        // RFC 6052 well-known prefix: 64:ff9b::/96.
-        if (bytes.AsSpan(0, 12).SequenceEqual(
-                new byte[] { 0x00, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0 }))
-        {
-            embeddedAddress = new IPAddress(new ReadOnlySpan<byte>(bytes, 12, 4));
-            return true;
-        }
-
-        // Preserve the deployment-specific 64:ff9b:1::/48 profile. RFC 6052
-        // reserves byte 8 in this layout, so reject non-zero values instead
-        // of treating an unrelated address as a translated IPv4 destination.
-        if (bytes.AsSpan(0, 6).SequenceEqual(
-                new byte[] { 0x00, 0x64, 0xFF, 0x9B, 0, 1 }) &&
-            bytes[8] == 0)
-        {
-            embeddedAddress = new IPAddress([bytes[6], bytes[7], bytes[9], bytes[10]]);
-            return true;
-        }
-
-        return false;
-    }
-
-    public virtual async Task<IReadOnlyList<IPAddress>> ResolveAndValidateAsync(
-        string host,
-        CancellationToken cancellationToken = default)
-    {
-        if (!IsHostNameAllowed(host))
-        {
-            throw ImageIngestionException.UnsafeDestination();
-        }
-
-        string cleanHost = host.Trim();
-        if (cleanHost.StartsWith('[') && cleanHost.EndsWith(']'))
-        {
-            cleanHost = cleanHost[1..^1];
-        }
-
-        if (IPAddress.TryParse(cleanHost, out var literalAddress))
-        {
-            if (literalAddress.AddressFamily == AddressFamily.InterNetworkV6 && literalAddress.ScopeId != 0)
-            {
-                throw ImageIngestionException.UnsafeDestination();
-            }
-
-            if (!IsAllowed(literalAddress))
-            {
-                throw ImageIngestionException.UnsafeDestination();
-            }
-
-            return [literalAddress];
-        }
-
-        IPAddress[] addresses;
-        try
-        {
-            addresses = await _dnsResolver(cleanHost, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (ex is SocketException or ArgumentException)
-        {
-            throw ImageIngestionException.DnsResolutionFailed(inner: ex);
-        }
-
-        if (addresses is null || addresses.Length == 0)
-        {
-            throw ImageIngestionException.DnsResolutionFailed();
-        }
-
-        // Every resolved address must be permitted (Section 10.1 / 19.12)
-        foreach (var addr in addresses)
-        {
-            if (!IsAllowed(addr))
-            {
-                throw ImageIngestionException.UnsafeDestination();
-            }
-        }
-
-        return addresses;
-    }
-
-    private readonly struct IPNetwork2
-    {
-        private readonly AddressFamily _family;
-        private readonly byte[] _networkBytes;
-        private readonly int _prefixLength;
-
-        private IPNetwork2(AddressFamily family, byte[] networkBytes, int prefixLength)
-        {
-            _family = family;
-            _networkBytes = networkBytes;
-            _prefixLength = prefixLength;
-        }
-
-        public static IPNetwork2 Parse(string ipString, int prefixLength)
-        {
-            var ip = IPAddress.Parse(ipString);
-            return new IPNetwork2(ip.AddressFamily, ip.GetAddressBytes(), prefixLength);
-        }
-
-        public bool Contains(IPAddress address)
-        {
-            if (address.AddressFamily != _family)
-            {
-                return false;
-            }
-
-            byte[] addrBytes = address.GetAddressBytes();
-            int fullBytes = _prefixLength / 8;
-            int remainingBits = _prefixLength % 8;
-
-            for (int i = 0; i < fullBytes; i++)
-            {
-                if (addrBytes[i] != _networkBytes[i])
-                {
-                    return false;
-                }
-            }
-
-            if (remainingBits > 0)
-            {
-                byte mask = (byte)(0xFF << (8 - remainingBits));
-                if ((addrBytes[fullBytes] & mask) != (_networkBytes[fullBytes] & mask))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-    }
-}
-```
-
-## 33. URL Policy & Redirect Target Validator
+## 32. URL Policy & Redirect Target Validator
 
 **File:** `backend/VehicleImage.Api/Security/UrlValidator.cs`  
-**Purpose:** Validates syntax, control chars, length, HTTP/HTTPS scheme, absence of UserInfo, port allowlist, IDN FQDN validity, relative redirect resolution, and query redaction for logs.
+**Purpose:** Validates syntax, control chars, length, HTTP/HTTPS scheme, absence of UserInfo, port allowlist, localhost/loopback rejection, IDN domain validity, relative redirect resolution, and query redaction for logs.
 
 ```csharp
 using System.Globalization;
@@ -1839,13 +1571,11 @@ namespace VehicleImage.Api.Security;
 public sealed class UrlValidator
 {
     private readonly RetrievalOptions _options;
-    private readonly DestinationValidator _destinationValidator;
     private static readonly IdnMapping Idn = new();
 
-    public UrlValidator(IOptions<RetrievalOptions> options, DestinationValidator destinationValidator)
+    public UrlValidator(IOptions<RetrievalOptions> options)
     {
         _options = options.Value;
-        _destinationValidator = destinationValidator;
     }
 
     public Uri Validate(string? raw)
@@ -1926,14 +1656,15 @@ public sealed class UrlValidator
             throw ImageIngestionException.InvalidUrl("The URL must specify a valid host.");
         }
 
-        if (!_destinationValidator.IsPortAllowed(uri.Port, _options.AllowedPorts))
+        if (!_options.AllowedPorts.Contains(uri.Port))
         {
             throw ImageIngestionException.UnsafeDestination($"Port {uri.Port} is not permitted.");
         }
 
-        if (!_destinationValidator.IsHostNameAllowed(uri.DnsSafeHost))
+        string normalizedHost = uri.DnsSafeHost.Trim().TrimEnd('.').ToLowerInvariant();
+        if (normalizedHost == "localhost" || normalizedHost.EndsWith(".localhost", StringComparison.Ordinal))
         {
-            throw ImageIngestionException.UnsafeDestination();
+            throw ImageIngestionException.UnsafeDestination("Localhost destinations are not permitted.");
         }
 
         if (uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6)
@@ -1943,14 +1674,9 @@ public sealed class UrlValidator
                 throw ImageIngestionException.InvalidUrl("The IP literal in the URL is malformed.");
             }
 
-            if (ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && ipAddress.ScopeId != 0)
+            if (IPAddress.IsLoopback(ipAddress))
             {
-                throw ImageIngestionException.UnsafeDestination();
-            }
-
-            if (!_destinationValidator.IsAllowed(ipAddress))
-            {
-                throw ImageIngestionException.UnsafeDestination();
+                throw ImageIngestionException.UnsafeDestination("Loopback destinations are not permitted.");
             }
 
             return uri;
@@ -1962,7 +1688,7 @@ public sealed class UrlValidator
             string asciiHost = Idn.GetAscii(uri.DnsSafeHost);
             if (string.IsNullOrWhiteSpace(asciiHost) || !asciiHost.Contains('.'))
             {
-                throw ImageIngestionException.InvalidUrl("The URL hostname must be a valid fully qualified domain name.");
+                throw ImageIngestionException.InvalidUrl("The URL hostname must be a valid domain name.");
             }
         }
         catch (ArgumentException)
@@ -1975,96 +1701,7 @@ public sealed class UrlValidator
 }
 ```
 
-## 34. SSRF-Guarded SocketsHttpHandler
-
-**File:** `backend/VehicleImage.Api/Security/SsrfGuardHttpHandler.cs`  
-**Purpose:** Disables auto-redirects/proxies/cookies and attaches a custom ConnectCallback that validates port and resolves DNS right at TCP connect time while preserving TLS SNI and Host header.
-
-```csharp
-using System.Net;
-using System.Net.Sockets;
-using VehicleImage.Api.Configuration;
-using VehicleImage.Api.Exceptions;
-
-namespace VehicleImage.Api.Security;
-
-public static class SsrfGuardHttpHandler
-{
-    public const string ClientName = "SsrfSafeRetrievalClient";
-
-    public static SocketsHttpHandler Create(DestinationValidator destinationValidator, RetrievalOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(destinationValidator);
-        ArgumentNullException.ThrowIfNull(options);
-
-        var handler = new SocketsHttpHandler
-        {
-            AllowAutoRedirect = false,
-            UseProxy = false,
-            UseCookies = false,
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
-            ConnectTimeout = TimeSpan.FromSeconds(options.ConnectTimeoutSeconds),
-            PooledConnectionLifetime = TimeSpan.FromSeconds(options.PooledConnectionLifetimeSeconds),
-            MaxResponseHeadersLength = 64,
-            ConnectCallback = async (context, cancellationToken) =>
-            {
-                string host = context.DnsEndPoint.Host;
-                int port = context.DnsEndPoint.Port;
-
-                if (!destinationValidator.IsPortAllowed(port, options.AllowedPorts))
-                {
-                    throw ImageIngestionException.UnsafeDestination($"Port {port} is not permitted.");
-                }
-
-                IReadOnlyList<IPAddress> validatedAddresses =
-                    await destinationValidator.ResolveAndValidateAsync(host, cancellationToken);
-
-                Exception? lastSocketFailure = null;
-
-                foreach (var address in validatedAddresses)
-                {
-                    var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
-                    {
-                        NoDelay = true
-                    };
-
-                    try
-                    {
-                        using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                        connectCts.CancelAfter(TimeSpan.FromSeconds(options.ConnectTimeoutSeconds));
-
-                        await socket.ConnectAsync(new IPEndPoint(address, port), connectCts.Token);
-                        return new NetworkStream(socket, ownsSocket: true);
-                    }
-                    catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-                    {
-                        socket.Dispose();
-                        lastSocketFailure = ImageIngestionException.ConnectionTimeout(inner: ex);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        socket.Dispose();
-                        lastSocketFailure = ex;
-                    }
-                }
-
-                if (lastSocketFailure is ImageIngestionException ingestionEx)
-                {
-                    throw ingestionEx;
-                }
-
-                throw ImageIngestionException.ConnectionTimeout(
-                    "Unable to establish a TCP connection to the supplier server.",
-                    lastSocketFailure);
-            }
-        };
-
-        return handler;
-    }
-}
-```
-
-## 35. Direct HTTP Retriever, Manual Redirects & Retry Loop
+## 33. Direct HTTP Retriever, Manual Redirects & Retry Loop
 
 **File:** `backend/VehicleImage.Api/Retrieval/DirectImageRetriever.cs`  
 **Purpose:** Executes GET requests with per-request timeouts, manual redirect validation (<= 5 hops), 16 KB chunked streaming bounded by MaxDownloadBytes (20 MB), and jittered exponential retries.
@@ -2083,9 +1720,10 @@ namespace VehicleImage.Api.Retrieval;
 
 public sealed class DirectImageRetriever
 {
+    public const string HttpClientName = "ImageRetrievalClient";
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly UrlValidator _urlValidator;
-    private readonly DestinationValidator _destinationValidator;
     private readonly RetrievalOptions _retrievalOptions;
     private readonly RetryOptions _retryOptions;
     private readonly ILogger<DirectImageRetriever> _logger;
@@ -2093,14 +1731,12 @@ public sealed class DirectImageRetriever
     public DirectImageRetriever(
         IHttpClientFactory httpClientFactory,
         UrlValidator urlValidator,
-        DestinationValidator destinationValidator,
         IOptions<RetrievalOptions> retrievalOptions,
         IOptions<RetryOptions> retryOptions,
         ILogger<DirectImageRetriever> logger)
     {
         _httpClientFactory = httpClientFactory;
         _urlValidator = urlValidator;
-        _destinationValidator = destinationValidator;
         _retrievalOptions = retrievalOptions.Value;
         _retryOptions = retryOptions.Value;
         _logger = logger;
@@ -2197,7 +1833,7 @@ public sealed class DirectImageRetriever
         CancellationToken cancellationToken)
     {
         Uri currentUri = _urlValidator.Validate(source.OriginalString);
-        HttpClient client = _httpClientFactory.CreateClient(SsrfGuardHttpHandler.ClientName);
+        HttpClient client = _httpClientFactory.CreateClient(HttpClientName);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(_retrievalOptions.TimeoutSeconds));
@@ -2205,8 +1841,6 @@ public sealed class DirectImageRetriever
 
         for (int hop = 0; hop <= _retrievalOptions.MaxRedirects; hop++)
         {
-            await _destinationValidator.ResolveAndValidateAsync(currentUri.DnsSafeHost, effectiveToken);
-
             using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
             request.Headers.TryAddWithoutValidation("User-Agent", _retrievalOptions.UserAgent);
             request.Headers.TryAddWithoutValidation(
@@ -2427,7 +2061,7 @@ public sealed class DirectImageRetriever
 }
 ```
 
-## 36. Static HTML Candidate Extractor & Ranker
+## 34. Static HTML Candidate Extractor & Ranker
 
 **File:** `backend/VehicleImage.Api/Retrieval/HtmlImageRetriever.cs`  
 **Purpose:** Decodes HTML charset, blocks soft-404 error pages, resolves <base href>, extracts og:image/twitter:image/srcset/data-src/img candidates, scores/deduplicates them, and fetches up to 3 candidates.
@@ -2966,7 +2600,7 @@ public sealed partial class HtmlImageRetriever
 }
 ```
 
-## 37. Single-GET Sniffing Retrieval Orchestrator
+## 35. Single-GET Sniffing Retrieval Orchestrator
 
 **File:** `backend/VehicleImage.Api/Retrieval/RetrievalOrchestrator.cs`  
 **Purpose:** Performs one initial GET through DirectImageRetriever and sniffs URL extension, binary magic bytes, SVG markers, and Content-Type to dispatch HTML pages without extra HEAD requests.
@@ -3123,7 +2757,7 @@ public sealed class RetrievalOrchestrator
 }
 ```
 
-## 38. Validated Image Metadata Models
+## 36. Validated Image Metadata Models
 
 **File:** `backend/VehicleImage.Api/ImageProcessing/ImageMetadata.cs`  
 **Purpose:** Defines ImageFormatKind (Jpeg, Png, WebP) and the validated ImageMetadata summary record.
@@ -3149,7 +2783,7 @@ public sealed record ImageMetadata(
 );
 ```
 
-## 39. ImageSharp Magic-Byte, Bomb & Full Pixel Validator
+## 37. ImageSharp Magic-Byte, Bomb & Full Pixel Validator
 
 **File:** `backend/VehicleImage.Api/ImageProcessing/ImageValidator.cs`  
 **Purpose:** Verifies binary signatures, JPEG FF D9 EOI tail, PNG IHDR dimension bounds, IdentifyAsync frame/size limits, full single-threaded LoadAsync<Rgba32> pixel decoding, and SHA-256 hashing.
@@ -3460,7 +3094,7 @@ public sealed class ImageValidator
 }
 ```
 
-## 40. Internal Storage Abstraction
+## 38. Internal Storage Abstraction
 
 **File:** `backend/VehicleImage.Api/Storage/IImageStorage.cs`  
 **Purpose:** Storage contract decoupling application services from local disk implementation (SaveAsync, OpenReadAsync, DeleteAsync).
@@ -3476,7 +3110,7 @@ public interface IImageStorage
 }
 ```
 
-## 41. Traversal-Safe Atomic Local Disk Storage
+## 39. Traversal-Safe Atomic Local Disk Storage
 
 **File:** `backend/VehicleImage.Api/Storage/LocalFileStorage.cs`  
 **Purpose:** Enforces strict path canonicalization inside Storage:RootPath, writes to hidden .tmp files with FlushAsync, and atomically swaps to vehicles/yyyy/MM/guid.ext via File.Move.
@@ -3685,7 +3319,7 @@ public sealed class LocalFileStorage : IImageStorage
 }
 ```
 
-## 42. Image Ingestion Service Contract
+## 40. Image Ingestion Service Contract
 
 **File:** `backend/VehicleImage.Api/Services/IImageIngestionService.cs`  
 **Purpose:** Defines the single-URL ingestion contract reused by single creation, image replacement, and CSV bulk import.
@@ -3701,7 +3335,7 @@ public interface IImageIngestionService
 }
 ```
 
-## 43. Image Ingestion Service
+## 41. Image Ingestion Service
 
 **File:** `backend/VehicleImage.Api/Services/ImageIngestionService.cs`  
 **Purpose:** Coordinates UrlValidator -> RetrievalOrchestrator -> ImageValidator -> LocalFileStorage, disposing rejected candidates and surfacing the most specific failure if none succeed.
@@ -3812,7 +3446,7 @@ public sealed class ImageIngestionService : IImageIngestionService
 }
 ```
 
-## 44. Vehicle Lifecycle Service Contract
+## 42. Vehicle Lifecycle Service Contract
 
 **File:** `backend/VehicleImage.Api/Services/IVehicleService.cs`  
 **Purpose:** Defines vehicle creation, safe image replacement, paged listing, and detail lookup operations.
@@ -3832,7 +3466,7 @@ public interface IVehicleService
 }
 ```
 
-## 45. Vehicle Persistence & Safe Replacement Service
+## 43. Vehicle Persistence & Safe Replacement Service
 
 **File:** `backend/VehicleImage.Api/Services/VehicleService.cs`  
 **Purpose:** Manages Vehicle + VehicleImage database persistence, compensating deletes on DB/cancellation failures, and optimistic transactional image replacement preserving old images until commit.
@@ -4177,7 +3811,7 @@ public sealed class VehicleService : IVehicleService
 }
 ```
 
-## 46. Image Delivery Service Contract
+## 44. Image Delivery Service Contract
 
 **File:** `backend/VehicleImage.Api/Services/IImageDeliveryService.cs`  
 **Purpose:** Contract and result record for streaming internally stored image blobs.
@@ -4198,7 +3832,7 @@ public interface IImageDeliveryService
 }
 ```
 
-## 47. Image Delivery Service
+## 45. Image Delivery Service
 
 **File:** `backend/VehicleImage.Api/Services/ImageDeliveryService.cs`  
 **Purpose:** Looks up image metadata in DB, opens storage stream (logging integrity errors if missing), and generates sanitized download filenames.
@@ -4315,7 +3949,7 @@ public sealed class ImageDeliveryService : IImageDeliveryService
 }
 ```
 
-## 48. CSV Bulk Import Service Contract (New on feature/csv-bulk-import)
+## 46. CSV Bulk Import Service Contract (New on feature/csv-bulk-import)
 
 **File:** `backend/VehicleImage.Api/Services/IVehicleImportService.cs`  
 **Purpose:** Defines bulk CSV ingestion contract accepting an uploaded IFormFile.
@@ -4331,7 +3965,7 @@ public interface IVehicleImportService
 }
 ```
 
-## 49. CSV Bulk Import Service (New on feature/csv-bulk-import)
+## 47. CSV Bulk Import Service (New on feature/csv-bulk-import)
 
 **File:** `backend/VehicleImage.Api/Services/VehicleImportService.cs`  
 **Purpose:** Uses CsvHelper 33.1.0 to validate file limits/headers/rows upfront (<= 50 rows) and sequentially processes each row in a fresh AsyncServiceScope via IVehicleService.CreateAsync.
@@ -4353,7 +3987,7 @@ namespace VehicleImage.Api.Services;
 /// <summary>
 /// Imports vehicles from a CSV file. Parsing and row validation happen up front; each valid row
 /// is then created sequentially through <see cref="IVehicleService.CreateAsync"/>, which already
-/// owns image ingestion (SSRF protection, retrieval, validation, storage), persistence and the
+/// owns image ingestion (URL validation, retrieval, image validation, storage), persistence and the
 /// compensating file delete on persistence failure.
 /// </summary>
 public sealed class VehicleImportService : IVehicleImportService
@@ -4685,7 +4319,7 @@ public sealed class VehicleImportService : IVehicleImportService
 }
 ```
 
-## 50. Vehicles API Controller (Modified on feature/csv-bulk-import)
+## 48. Vehicles API Controller (Modified on feature/csv-bulk-import)
 
 **File:** `backend/VehicleImage.Api/Controllers/VehiclesController.cs`  
 **Purpose:** Exposes POST /api/vehicles, POST /api/vehicles/import (multipart/form-data), GET /api/vehicles, GET /api/vehicles/{id}, and PUT /api/vehicles/{id}/image.
@@ -4793,7 +4427,7 @@ public sealed class VehiclesController : ControllerBase
 }
 ```
 
-## 51. Internal Images API Controller
+## 49. Internal Images API Controller
 
 **File:** `backend/VehicleImage.Api/Controllers/ImagesController.cs`  
 **Purpose:** Serves stored image bytes at GET /api/images/{id} and /download with X-Content-Type-Options: nosniff and 1-year immutable Cache-Control headers.

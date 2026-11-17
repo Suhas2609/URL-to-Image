@@ -106,21 +106,27 @@ builder.Services.AddControllers()
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
-// 4. Security singletons and SSRF-safe HttpClient
-builder.Services.AddSingleton<DestinationValidator>();
+// 4. Validation, storage singletons and HttpClient
 builder.Services.AddSingleton<UrlValidator>();
 builder.Services.AddSingleton<ImageValidator>();
 builder.Services.AddSingleton<IImageStorage, LocalFileStorage>();
 
-builder.Services.AddHttpClient(SsrfGuardHttpHandler.ClientName, client =>
+builder.Services.AddHttpClient(DirectImageRetriever.HttpClientName, client =>
 {
     client.Timeout = Timeout.InfiniteTimeSpan; // Enforced per-request by DirectImageRetriever
 })
 .ConfigurePrimaryHttpMessageHandler(sp =>
 {
-    var destinationValidator = sp.GetRequiredService<DestinationValidator>();
     var retrievalOptions = sp.GetRequiredService<IOptions<RetrievalOptions>>().Value;
-    return SsrfGuardHttpHandler.Create(destinationValidator, retrievalOptions);
+    return new System.Net.Http.SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate | System.Net.DecompressionMethods.Brotli,
+        ConnectTimeout = TimeSpan.FromSeconds(retrievalOptions.ConnectTimeoutSeconds),
+        PooledConnectionLifetime = TimeSpan.FromSeconds(retrievalOptions.PooledConnectionLifetimeSeconds),
+        MaxResponseHeadersLength = 64
+    };
 });
 
 // 5. Retrieval and application services

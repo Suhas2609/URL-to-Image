@@ -9,13 +9,11 @@ namespace VehicleImage.Api.Security;
 public sealed class UrlValidator
 {
     private readonly RetrievalOptions _options;
-    private readonly DestinationValidator _destinationValidator;
     private static readonly IdnMapping Idn = new();
 
-    public UrlValidator(IOptions<RetrievalOptions> options, DestinationValidator destinationValidator)
+    public UrlValidator(IOptions<RetrievalOptions> options)
     {
         _options = options.Value;
-        _destinationValidator = destinationValidator;
     }
 
     public Uri Validate(string? raw)
@@ -96,14 +94,15 @@ public sealed class UrlValidator
             throw ImageIngestionException.InvalidUrl("The URL must specify a valid host.");
         }
 
-        if (!_destinationValidator.IsPortAllowed(uri.Port, _options.AllowedPorts))
+        if (!_options.AllowedPorts.Contains(uri.Port))
         {
             throw ImageIngestionException.UnsafeDestination($"Port {uri.Port} is not permitted.");
         }
 
-        if (!_destinationValidator.IsHostNameAllowed(uri.DnsSafeHost))
+        string normalizedHost = uri.DnsSafeHost.Trim().TrimEnd('.').ToLowerInvariant();
+        if (normalizedHost == "localhost" || normalizedHost.EndsWith(".localhost", StringComparison.Ordinal))
         {
-            throw ImageIngestionException.UnsafeDestination();
+            throw ImageIngestionException.UnsafeDestination("Localhost destinations are not permitted.");
         }
 
         if (uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6)
@@ -113,14 +112,9 @@ public sealed class UrlValidator
                 throw ImageIngestionException.InvalidUrl("The IP literal in the URL is malformed.");
             }
 
-            if (ipAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && ipAddress.ScopeId != 0)
+            if (IPAddress.IsLoopback(ipAddress))
             {
-                throw ImageIngestionException.UnsafeDestination();
-            }
-
-            if (!_destinationValidator.IsAllowed(ipAddress))
-            {
-                throw ImageIngestionException.UnsafeDestination();
+                throw ImageIngestionException.UnsafeDestination("Loopback destinations are not permitted.");
             }
 
             return uri;
@@ -132,7 +126,7 @@ public sealed class UrlValidator
             string asciiHost = Idn.GetAscii(uri.DnsSafeHost);
             if (string.IsNullOrWhiteSpace(asciiHost) || !asciiHost.Contains('.'))
             {
-                throw ImageIngestionException.InvalidUrl("The URL hostname must be a valid fully qualified domain name.");
+                throw ImageIngestionException.InvalidUrl("The URL hostname must be a valid domain name.");
             }
         }
         catch (ArgumentException)

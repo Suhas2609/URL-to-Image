@@ -1,5 +1,8 @@
 # Complete VehicleImageSystem Codebase
 
+> [!NOTE]
+> **Historical Snapshot:** This file captures the codebase prior to the CSV bulk import, Google Drive retrieval, and URL-validation simplification changes (when `DestinationValidator` and `SsrfGuardHttpHandler` were still present). Refer to [`README.md`](../README.md), [`Architecture_and_Decisions.md`](./Architecture_and_Decisions.md), and [`project-learning/`](./project-learning/README.md) for the current implementation.
+
 ## 1. Repository Overview
 
 Repository tree (generated and irrelevant directories excluded):

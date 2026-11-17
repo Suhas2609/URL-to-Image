@@ -11,9 +11,10 @@ namespace VehicleImage.Api.Retrieval;
 
 public sealed class DirectImageRetriever
 {
+    public const string HttpClientName = "ImageRetrievalClient";
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly UrlValidator _urlValidator;
-    private readonly DestinationValidator _destinationValidator;
     private readonly RetrievalOptions _retrievalOptions;
     private readonly RetryOptions _retryOptions;
     private readonly ILogger<DirectImageRetriever> _logger;
@@ -21,14 +22,12 @@ public sealed class DirectImageRetriever
     public DirectImageRetriever(
         IHttpClientFactory httpClientFactory,
         UrlValidator urlValidator,
-        DestinationValidator destinationValidator,
         IOptions<RetrievalOptions> retrievalOptions,
         IOptions<RetryOptions> retryOptions,
         ILogger<DirectImageRetriever> logger)
     {
         _httpClientFactory = httpClientFactory;
         _urlValidator = urlValidator;
-        _destinationValidator = destinationValidator;
         _retrievalOptions = retrievalOptions.Value;
         _retryOptions = retryOptions.Value;
         _logger = logger;
@@ -125,7 +124,7 @@ public sealed class DirectImageRetriever
         CancellationToken cancellationToken)
     {
         Uri currentUri = _urlValidator.Validate(source.OriginalString);
-        HttpClient client = _httpClientFactory.CreateClient(SsrfGuardHttpHandler.ClientName);
+        HttpClient client = _httpClientFactory.CreateClient(HttpClientName);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(_retrievalOptions.TimeoutSeconds));
@@ -133,8 +132,6 @@ public sealed class DirectImageRetriever
 
         for (int hop = 0; hop <= _retrievalOptions.MaxRedirects; hop++)
         {
-            await _destinationValidator.ResolveAndValidateAsync(currentUri.DnsSafeHost, effectiveToken);
-
             using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
             request.Headers.TryAddWithoutValidation("User-Agent", _retrievalOptions.UserAgent);
             request.Headers.TryAddWithoutValidation(

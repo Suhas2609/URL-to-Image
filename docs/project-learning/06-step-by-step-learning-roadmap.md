@@ -1,6 +1,6 @@
 # Step-by-Step Learning Roadmap (7-Day Mastery Plan)
 
-This structured study plan takes you from startup wiring through SSRF defense, binary image validation, transactional database persistence, CSV bulk ingestion, and the React dashboard so you can explain, modify, debug, and defend the entire `URL-to-Image` (`feature/csv-bulk-import`) codebase independently.
+This structured study plan takes you from startup wiring through URL policy validation, binary image validation, transactional database persistence, CSV bulk ingestion, and the React dashboard so you can explain, modify, debug, and defend the entire `URL-to-Image` codebase independently.
 
 ---
 
@@ -40,26 +40,25 @@ How the API boots, validates config before accepting traffic, shapes validation 
 
 ---
 
-## Day 2: SSRF Defense, DNS Rebinding, Streaming HTTP Retrieval & Retries
+## Day 2: URL Policy Validation, Streaming HTTP Retrieval & Retries
 
 ### Focus
-Why naive URL checks fail against SSRF, and how `ConnectCallback`, manual redirects, chunked stream caps, and selective retries work together.
+How basic URL policy validation (`UrlValidator`), manual redirects, `SocketsHttpHandler` HTTP safeguards, chunked stream caps, and selective retries work together.
 
 ### Files & Methods to Read
-1. `backend/VehicleImage.Api/Security/DestinationValidator.cs` (`IsHostNameAllowed`, `IsAllowed`, `TryDecodeNat64EmbeddedAddress`, `ResolveAndValidateAsync`)
-2. `backend/VehicleImage.Api/Security/UrlValidator.cs` (`Validate`, `ValidateRedirectTarget`, `RedactForLogging`)
-3. `backend/VehicleImage.Api/Security/SsrfGuardHttpHandler.cs` (`Create` -> `ConnectCallback`)
-4. `backend/VehicleImage.Api/Retrieval/DirectImageRetriever.cs` (`FetchWithRetriesAsync`, `ShouldRetry`, `ExecuteSingleFetchAsync`, `ReadBoundedStreamAsync`)
+1. `backend/VehicleImage.Api/Security/UrlValidator.cs` (`Validate`, `ValidateRedirectTarget`, `ValidateUriPolicy`, `RedactForLogging`)
+2. `backend/VehicleImage.Api/Program.cs` (`ImageRetrievalClient` `SocketsHttpHandler` configuration)
+3. `backend/VehicleImage.Api/Retrieval/DirectImageRetriever.cs` (`FetchWithRetriesAsync`, `ShouldRetry`, `ExecuteSingleFetchAsync`, `ReadBoundedStreamAsync`)
 
 ### Concepts to Master
-- Why `ConnectCallback` stops DNS rebinding TOCTOU without breaking HTTPS SNI or HTTP `Host` headers.
-- Why `AllowAutoRedirect`, `UseProxy`, and `UseCookies` are all disabled.
+- Why `UrlValidator` rejects `localhost`/`*.localhost`, loopback IP literals (`127.0.0.1`, `[::1]`), embedded `UserInfo`, control characters, non-HTTP/HTTPS schemes, and non-`80`/`443` ports both initially and on redirect targets.
+- Why `AllowAutoRedirect` and `UseCookies` are disabled on `SocketsHttpHandler`.
 - Why `HttpClient.Timeout` is `InfiniteTimeSpan` while `DirectImageRetriever` creates per-attempt linked timeout CTS.
 - How `ReadBoundedStreamAsync` defeats missing/spoofed `Content-Length` headers and gzip bombs.
 
 ### Diagrams to Redraw From Memory
-- Diagram 4: SSRF Multi-Layer Defense Flow
-- Diagram 5: DNS Rebinding & `SocketsHttpHandler.ConnectCallback` Flow
+- Diagram 4: URL Policy Validation & Retrieval Flow
+- Diagram 5: Redirect Hop Validation & `SocketsHttpHandler` Safeguards
 - Diagram 6: Manual Redirect Validation Loop
 - Diagram 7 & Diagram 8: Retry Decision + Bounded Streaming Cap
 
@@ -67,8 +66,8 @@ Why naive URL checks fail against SSRF, and how `ConnectCallback`, manual redire
 - Q3.1, Q3.2, Q3.3, Q3.4, Q4.1, Q4.2, Q4.3
 
 ### Verification Exercise
-1. Trace `POST /api/vehicles` with `http://169.254.169.254/latest/meta-data/` and with `http://[::ffff:127.0.0.1]/test.jpg` step-by-step through `UrlValidator` and `DestinationValidator`.
-2. Read `tests/UnitTests/DestinationValidatorTests.cs` and `tests/IntegrationTests/SsrfSecurityTests.cs` to see every IPv4/IPv6 bypass test case.
+1. Trace `POST /api/vehicles` with `http://localhost/car.jpg` and with `https://example.com:8443/car.jpg` step-by-step through `UrlValidator.Validate` and `ValidateUriPolicy`.
+2. Read `tests/UnitTests/UrlValidatorTests.cs` and `tests/IntegrationTests/UrlValidationTests.cs` to see every scheme, port, localhost, loopback, and redirect validation test case.
 
 ---
 
@@ -139,7 +138,7 @@ Zero-downtime replacements, preventing orphan files on DB crashes/cancellations,
 ## Day 5: CSV Bulk Vehicle Ingestion (`feature/csv-bulk-import` Deep Dive)
 
 ### Focus
-Mastering every line of the feature branch: RFC 4180 CSV parsing, two-phase validation, partial success, controller limits, and per-row `AsyncServiceScope`.
+Mastering RFC 4180 CSV parsing, two-phase validation, partial success, controller limits, and per-row `AsyncServiceScope`.
 
 ### Files & Methods to Read
 1. `backend/VehicleImage.Api/Configuration/BulkImportOptions.cs`
@@ -161,7 +160,7 @@ Mastering every line of the feature branch: RFC 4180 CSV parsing, two-phase vali
 - Q12.1, Q12.2, Q12.3
 
 ### Verification Exercise
-1. Construct a 4-row test CSV containing: (a) a valid direct Wikimedia URL with quoted `"Competition, xDrive"` variant, (b) an empty `,,,,` separator row, (c) an invalid year `1800`, and (d) `http://169.254.169.254/latest/meta-data/`. Predict the exact JSON output (`TotalRows`, `SuccessfulRows`, `FailedRows`, and each `RowNumber`/`ErrorCode`) before checking against `VehicleImportService.cs`.
+1. Construct a 4-row test CSV containing: (a) a valid direct Wikimedia URL with quoted `"Competition, xDrive"` variant, (b) an empty `,,,,` separator row, (c) an invalid year `1800`, and (d) `http://localhost/car.jpg`. Predict the exact JSON output (`TotalRows`, `SuccessfulRows`, `FailedRows`, and each `RowNumber`/`ErrorCode`) before checking against `VehicleImportService.cs`.
 
 ---
 
@@ -206,7 +205,7 @@ Tie the whole system together under interview pressure, practice explaining bugs
 ### Mock Defence Drill (Time-Boxed 30 Minutes — No Notes)
 Answer these 8 questions aloud cleanly in under 3 minutes each:
 1. Trace a single URL submission from React click to SQL commit and `<img src="/api/images/{id}">`.
-2. Defend how SSRF and DNS rebinding are prevented without breaking HTTPS TLS SNI.
+2. Explain what `UrlValidator` and `DirectImageRetriever` validate on initial URLs and redirects, and what additional network-level protections would be needed before exposing this service to untrusted public users.
 3. Explain what happens when a supplier returns a 50 MB gzipped HTML page masquerading as `.jpg`.
 4. Explain what happens if SQL Server throws an error *after* `LocalFileStorage.SaveAsync` finishes—and what happens if the user closed their browser tab mid-commit.
 5. Walk through `PUT /api/vehicles/{id}/image` under a concurrent race between two admins.

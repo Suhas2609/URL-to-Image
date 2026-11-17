@@ -16,13 +16,11 @@ public class HtmlCandidateRankingTests
         var retrievalOptions = Options.Create(new RetrievalOptions());
         var retryOptions = Options.Create(new RetryOptions());
         var htmlOptions = Options.Create(new HtmlExtractionOptions());
-        var destinationValidator = new DestinationValidator();
-        var urlValidator = new UrlValidator(retrievalOptions, destinationValidator);
+        var urlValidator = new UrlValidator(retrievalOptions);
 
         var directRetriever = new DirectImageRetriever(
             new DummyHttpClientFactory(),
             urlValidator,
-            destinationValidator,
             retrievalOptions,
             retryOptions,
             NullLogger<DirectImageRetriever>.Instance);
