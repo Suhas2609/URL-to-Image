@@ -85,6 +85,9 @@ Building on top of CSV bulk import, the `feature/google-drive-image-retrieval` b
 
 ## 5. Verification & Test Suite Status
 
-- **Automated Test Suite (`dotnet test --configuration Release`)**: Passed (`115/115` total — `65` unit tests, `50` integration tests, `0` failed, `0` skipped).
+- **Verified Commit**: `4c409c0226888d59882c115ac5f8bb8ceea249f3` (`4c409c0`)
+- **Verification Date**: `2026-11-18`
+- **Automated Test Suite (`dotnet test --configuration Release`)**: Passed (`126/126` total — `65` unit tests, `61` integration tests, `0` failed, `0` skipped).
 - **Frontend Build (`npm run build`)**: Passed (`vite build` in 1.14s, 37 modules transformed).
-- **Live Servers**: Backend running on port 5080 with SQLite; Frontend running on Vite port 5173 proxying `/api` and `/health`.
+- **Live Verification**: Single vehicle ingestion, URL policy enforcement, image replacement, and image delivery verified live via frontend and API; manual verification performed for CSV bulk import and Google Drive public image retrieval.
+- **Test Gap Disclosure**: Dedicated automated xUnit integration tests for CSV bulk import (`POST /api/vehicles/import`) and Google Drive public retrieval (`GoogleDriveImageRetriever`) are not yet present; they have been verified via live API and UI workflows.

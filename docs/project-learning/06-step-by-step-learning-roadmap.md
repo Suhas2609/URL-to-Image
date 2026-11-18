@@ -143,7 +143,7 @@ Zero-downtime replacements, preventing orphan files on DB crashes/cancellations,
 
 ---
 
-## Day 5: CSV Bulk Vehicle Ingestion (`feature/csv-bulk-import` Deep Dive)
+## Day 5: CSV Bulk Vehicle Ingestion
 
 ### Focus
 Mastering RFC 4180 CSV parsing, two-phase validation, partial success, controller limits, and per-row `AsyncServiceScope`.

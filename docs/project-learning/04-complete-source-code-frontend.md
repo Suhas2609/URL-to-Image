@@ -1,6 +1,6 @@
-# Complete Frontend Source Code Appendix (`feature/csv-bulk-import`)
+# Complete Frontend Source Code Appendix (`feature/google-drive-image-retrieval`)
 
-This appendix contains the complete, verbatim, unabbreviated source code of all **14 source and configuration files** in `frontend/vehicle-image-dashboard/` on branch `feature/csv-bulk-import` (`49e9d84`).
+This appendix contains the complete, verbatim, unabbreviated source code of all **14 source and configuration files** in `frontend/vehicle-image-dashboard/` on branch `feature/google-drive-image-retrieval`.
 
 ## Table of Contents
 
@@ -9,15 +9,15 @@ This appendix contains the complete, verbatim, unabbreviated source code of all 
 3. `frontend/vehicle-image-dashboard/index.html` — HTML Document Shell
 4. `frontend/vehicle-image-dashboard/src/main.jsx` — React Entry Point
 5. `frontend/vehicle-image-dashboard/src/App.jsx` — Application Shell & Header
-6. `frontend/vehicle-image-dashboard/src/services/vehicleApi.js` — API Service Layer & Error Normalizer (Modified on feature/csv-bulk-import)
-7. `frontend/vehicle-image-dashboard/src/pages/DashboardPage.jsx` — Dashboard Page & Catalog Coordinator (Modified on feature/csv-bulk-import)
-8. `frontend/vehicle-image-dashboard/src/components/VehicleForm.jsx` — Single Vehicle Ingestion Form (Modified on feature/csv-bulk-import)
-9. `frontend/vehicle-image-dashboard/src/components/BulkImportForm.jsx` — CSV Bulk Import Panel (New on feature/csv-bulk-import)
+6. `frontend/vehicle-image-dashboard/src/services/vehicleApi.js` — API Service Layer & Error Normalizer
+7. `frontend/vehicle-image-dashboard/src/pages/DashboardPage.jsx` — Dashboard Page & Catalog Coordinator
+8. `frontend/vehicle-image-dashboard/src/components/VehicleForm.jsx` — Single Vehicle Ingestion Form (With Google Drive Preset & URL Input)
+9. `frontend/vehicle-image-dashboard/src/components/BulkImportForm.jsx` — CSV Bulk Import Panel
 10. `frontend/vehicle-image-dashboard/src/components/VehicleCard.jsx` — Vehicle Catalog Card
 11. `frontend/vehicle-image-dashboard/src/components/ImageReplaceForm.jsx` — Inline Image Replacement Form
 12. `frontend/vehicle-image-dashboard/src/components/StatusBadge.jsx` — Status Badge Component
 13. `frontend/vehicle-image-dashboard/src/components/ImagePlaceholder.jsx` — Fallback Image Placeholder
-14. `frontend/vehicle-image-dashboard/src/index.css` — Dashboard Design System & Layout CSS (Modified on feature/csv-bulk-import)
+14. `frontend/vehicle-image-dashboard/src/index.css` — Dashboard Design System & Layout CSS (Window Dots Console & Scrollable Catalog)
 
 ---
 
@@ -456,10 +456,10 @@ export default function DashboardPage() {
 }
 ```
 
-## 8. Single Vehicle Ingestion Form (Modified on feature/csv-bulk-import)
+## 8. Single Vehicle Ingestion Form
 
 **File:** `frontend/vehicle-image-dashboard/src/components/VehicleForm.jsx`  
-**Purpose:** Controlled form for individual URL submissions with 3 quick verification presets and structured success/rejection feedback.
+**Purpose:** Controlled form for individual URL submissions with 4 quick verification presets (including Google Drive sharing URL) and structured success/rejection feedback.
 
 ```jsx
 import React, { useState } from 'react';
@@ -483,6 +483,15 @@ const DEMO_PRESETS = [
     variant: 'Competition xDrive',
     year: 2026,
     imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/39/2021_BMW_M3_Competition_Automatic_3.0_Front.jpg/960px-2021_BMW_M3_Competition_Automatic_3.0_Front.jpg'
+  },
+  {
+    id: 'preset-vehicle-d',
+    label: 'Vehicle D: Google Drive Link',
+    make: 'Honda',
+    model: 'Civic',
+    variant: 'Public Drive Image',
+    year: 2026,
+    imageUrl: 'https://drive.google.com/file/d/1Y7xhUt-X-Frjt-gHtPXt7BEQL5101O7e/view?usp=sharing'
   },
   {
     id: 'preset-vehicle-c',
@@ -560,7 +569,7 @@ export default function VehicleForm({ onVehicleCreated }) {
         Submit Supplier Vehicle &amp; Image URL
       </h2>
       <p className="panel-description">
-        Fetches via bounded HTTP streaming, validates magic bytes &amp; decoded dimensions, and persists internally.
+        Fetches via validated URL streaming, validates magic bytes &amp; decoded dimensions, and persists internally.
       </p>
 
       <div className="preset-group">
@@ -654,7 +663,7 @@ export default function VehicleForm({ onVehicleCreated }) {
 
         <div className="field-group">
           <label className="field-label" htmlFor="vehicle-image-url">
-            Supplier Image or Webpage URL
+            Supplier Image, Webpage, or Google Drive URL
           </label>
           <input
             id="vehicle-image-url"
@@ -662,7 +671,7 @@ export default function VehicleForm({ onVehicleCreated }) {
             required
             maxLength={2048}
             className="field-input field-input-mono"
-            placeholder="https://supplier.example.com/listing-or-image"
+            placeholder="https://drive.google.com/file/d/... or https://supplier.example.com/image.jpg"
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
             disabled={submitting}
