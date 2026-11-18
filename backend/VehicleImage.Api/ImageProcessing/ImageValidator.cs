@@ -176,13 +176,49 @@ public sealed class ImageValidator
 
     private static (ImageFormatKind Kind, string ContentType, string Extension) InspectSignature(ReadOnlySpan<byte> header)
     {
+        if (TryMatchBinaryImageSignature(
+            header,
+            out ImageFormatKind kind,
+            out string contentType,
+            out string extension,
+            out string? unsupportedFormatName))
+        {
+            if (unsupportedFormatName is not null)
+            {
+                throw ImageIngestionException.UnsupportedImageFormat(unsupportedFormatName);
+            }
+
+            return (kind, contentType, extension);
+        }
+
+        // Check for HTML, XML, SVG, or JSON text content -> UNSUPPORTED_CONTENT_TYPE
+        if (IsLikelyTextMarkupOrJson(header))
+        {
+            throw ImageIngestionException.UnsupportedContentType(
+                "The retrieved resource is HTML, XML, SVG or JSON rather than a binary image.");
+        }
+
+        throw ImageIngestionException.UnsupportedContentType();
+    }
+
+    internal static bool TryMatchBinaryImageSignature(
+        ReadOnlySpan<byte> header,
+        out ImageFormatKind kind,
+        out string contentType,
+        out string extension,
+        out string? unsupportedFormatName)
+    {
         // JPEG: FF D8 FF
         if (header.Length >= 3 &&
             header[0] == 0xFF &&
             header[1] == 0xD8 &&
             header[2] == 0xFF)
         {
-            return (ImageFormatKind.Jpeg, "image/jpeg", ".jpg");
+            kind = ImageFormatKind.Jpeg;
+            contentType = "image/jpeg";
+            extension = ".jpg";
+            unsupportedFormatName = null;
+            return true;
         }
 
         // PNG: 89 50 4E 47 0D 0A 1A 0A
@@ -196,7 +232,11 @@ public sealed class ImageValidator
             header[6] == 0x1A &&
             header[7] == 0x0A)
         {
-            return (ImageFormatKind.Png, "image/png", ".png");
+            kind = ImageFormatKind.Png;
+            contentType = "image/png";
+            extension = ".png";
+            unsupportedFormatName = null;
+            return true;
         }
 
         // WebP: "RIFF" + 4 size bytes + "WEBP"
@@ -210,8 +250,16 @@ public sealed class ImageValidator
             header[10] == (byte)'B' &&
             header[11] == (byte)'P')
         {
-            return (ImageFormatKind.WebP, "image/webp", ".webp");
+            kind = ImageFormatKind.WebP;
+            contentType = "image/webp";
+            extension = ".webp";
+            unsupportedFormatName = null;
+            return true;
         }
+
+        kind = default;
+        contentType = string.Empty;
+        extension = string.Empty;
 
         // Recognised but unsupported image formats -> UNSUPPORTED_IMAGE_FORMAT
         // GIF87a or GIF89a
@@ -223,7 +271,8 @@ public sealed class ImageValidator
             (header[4] == (byte)'7' || header[4] == (byte)'9') &&
             header[5] == (byte)'a')
         {
-            throw ImageIngestionException.UnsupportedImageFormat("GIF");
+            unsupportedFormatName = "GIF";
+            return true;
         }
 
         // BMP: "BM"
@@ -231,7 +280,8 @@ public sealed class ImageValidator
             header[0] == (byte)'B' &&
             header[1] == (byte)'M')
         {
-            throw ImageIngestionException.UnsupportedImageFormat("BMP");
+            unsupportedFormatName = "BMP";
+            return true;
         }
 
         // TIFF: "II*\0" or "MM\0*"
@@ -239,7 +289,8 @@ public sealed class ImageValidator
             ((header[0] == 0x49 && header[1] == 0x49 && header[2] == 0x2A && header[3] == 0x00) ||
              (header[0] == 0x4D && header[1] == 0x4D && header[2] == 0x00 && header[3] == 0x2A)))
         {
-            throw ImageIngestionException.UnsupportedImageFormat("TIFF");
+            unsupportedFormatName = "TIFF";
+            return true;
         }
 
         // ICO: 00 00 01 00
@@ -249,7 +300,8 @@ public sealed class ImageValidator
             header[2] == 0x01 &&
             header[3] == 0x00)
         {
-            throw ImageIngestionException.UnsupportedImageFormat("ICO");
+            unsupportedFormatName = "ICO";
+            return true;
         }
 
         // ISO BMFF (AVIF / HEIC): bytes 4..7 == "ftyp"
@@ -259,22 +311,22 @@ public sealed class ImageValidator
             header[6] == (byte)'y' &&
             header[7] == (byte)'p')
         {
-            throw ImageIngestionException.UnsupportedImageFormat("AVIF/HEIF");
+            unsupportedFormatName = "AVIF/HEIF";
+            return true;
         }
 
-        // Check for HTML, XML, SVG, or JSON text content -> UNSUPPORTED_CONTENT_TYPE
+        unsupportedFormatName = null;
+        return false;
+    }
+
+    internal static bool IsLikelyTextMarkupOrJson(ReadOnlySpan<byte> header)
+    {
         string textSample = Encoding.UTF8.GetString(header).TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
-        if (textSample.StartsWith('<') ||
-            textSample.Contains("<svg", StringComparison.OrdinalIgnoreCase) ||
-            textSample.Contains("<html", StringComparison.OrdinalIgnoreCase) ||
-            textSample.StartsWith('{') ||
-            textSample.StartsWith('['))
-        {
-            throw ImageIngestionException.UnsupportedContentType(
-                "The retrieved resource is HTML, XML, SVG or JSON rather than a binary image.");
-        }
-
-        throw ImageIngestionException.UnsupportedContentType();
+        return textSample.StartsWith('<') ||
+               textSample.Contains("<svg", StringComparison.OrdinalIgnoreCase) ||
+               textSample.Contains("<html", StringComparison.OrdinalIgnoreCase) ||
+               textSample.StartsWith('{') ||
+               textSample.StartsWith('[');
     }
 
     private static bool HasValidJpegEndOfImage(Stream content)

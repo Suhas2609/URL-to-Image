@@ -78,7 +78,7 @@ Read these modules in order; each builds on the previous layer.
   - `RedactForLogging(uri)` strips query parameters and fragments (`uri.GetLeftPart(UriPartial.Path)`) to avoid logging tokens/signed URLs.
 - **Boundary / Design Note:** Complex DNS pre-resolution, IPv4/IPv6 private CIDR blocklists, NAT64/6to4/IPv4-mapped decoding, and socket `ConnectCallback` IP pinning (`DestinationValidator` / `SsrfGuardHttpHandler`) were intentionally removed for this controlled portfolio workflow. Untrusted multi-tenant deployments should pair `UrlValidator` with host/VPC egress controls.
 
-### Module 5: Streaming Retrieval, Redirects, Bounded Reads & Retries (`Retrieval/DirectImageRetriever.cs`, `Models/RetrievedImage.cs`)
+### Module 5: Header-First Streaming Retrieval, 1 KB Prefix Classification & Bounded Reads (`Retrieval/DirectImageRetriever.cs`, `Models/RetrievedImage.cs`)
 - **HttpClient Registration (`Program.cs`):**
   - Registers named client `DirectImageRetriever.HttpClientName` (`"ImageRetrievalClient"`) with `client.Timeout = Timeout.InfiniteTimeSpan` and a `SocketsHttpHandler` configured with `AllowAutoRedirect = false`, `UseCookies = false`, `AutomaticDecompression = GZip | Deflate | Brotli`, `ConnectTimeout = 5s`, `PooledConnectionLifetime = 60s`, and `MaxResponseHeadersLength = 64`.
 - **Manual Redirect Loop (`ExecuteSingleFetchAsync`):**
@@ -86,24 +86,36 @@ Read these modules in order; each builds on the previous layer.
   - Loops `hop = 0` up to `MaxRedirects` (5): calls `SendAsync(..., HttpCompletionOption.ResponseHeadersRead, effectiveToken)`.
   - If status is `301`, `302`, `303`, `307`, `308`: checks `hop >= MaxRedirects` (throws `REDIRECT_LIMIT_EXCEEDED`), calls `_urlValidator.ValidateRedirectTarget`, and continues loop.
   - Otherwise validates `2xx` (`404` -> `HttpNotFound`, `401` -> `HttpUnauthorized`, `403` -> `HttpForbidden`, `429` -> parses `Retry-After` Delta or HTTP Date -> `HttpRateLimited`, `5xx` -> `HttpServerError`, others -> `HttpError`).
-- **Bounded Stream Transfer (`ReadBoundedStreamAsync`):**
-  - Never trusts `Content-Length` (could be absent on chunked responses, spoofed, or smaller than decompressed gzip/brotli output).
-  - Reads in 16 KB chunks using `effectiveToken`, tracking running `totalRead`. As soon as `totalRead > MaxDownloadBytes` (20 MB), aborts immediately with `IMAGE_TOO_LARGE` and disposes the partial `MemoryStream`.
-  - Distinguishes caller cancellation (`when (callerToken.IsCancellationRequested)` -> rethrows `OperationCanceledException`) vs timeout token expiry (`catch (OperationCanceledException ex)` -> throws `RequestTimeout`).
+- **Initial 1 KB Prefix Reading & Early Classification (`ReadBoundedWithClassificationAsync`):**
+  - **Classification vs. Full Validation**: The 1 KB inspection is *classification*, not full image validation. It determines whether to continue streaming the payload as an image or webpage, or to abort immediately. Full image integrity, dimensions, decompression bounds, and pixel decoding are performed subsequently by `ImageValidator.ValidateAsync`.
+  - Reads up to `ClassificationPrefixBytes = 1024` bytes directly from `networkStream` under `ResponseHeadersRead`:
+    1. **BOM & Whitespace Resilient**: Strips UTF-8/Unicode BOM (`\uFEFF`) and leading whitespace (`' '`, `\t`, `\r`, `\n`) before evaluating markup samples.
+    2. **Supported Binary Images (`JPEG`, `PNG`, `WebP`)**: Detected via `ImageValidator.TryMatchBinaryImageSignature`. Writes the 1 KB prefix into `MemoryStream` and continues streaming the remaining body.
+    3. **Unsupported Formats (`GIF`, `BMP`, `TIFF`, `ICO`, `AVIF/HEIF`)**: Recognized immediately and rejected with `UNSUPPORTED_IMAGE_FORMAT` without buffering the remaining payload.
+    4. **Non-Image Streams (PDF, MP4, JSON, SVG)**: If `allowHtml == false` or the payload does not match HTML markers, throws `UNSUPPORTED_CONTENT_TYPE` after reading <= 1 KB, discarding the network stream.
+    5. **HTML Webpages (`allowHtml: true`)**: Detected via `RetrievalOrchestrator.IsHtmlPayload` (`Content-Type` or text markers like `<!doctype html`, `<html`, `<head`, `<meta`, `og:image`). Preserves prefix in `MemoryStream` and streams remainder up to `MaxDownloadBytes`.
+  - **Prefix Preservation**: The initial 1 KB buffer is written to `memoryStream.Write(chunk, 0, prefixCount)` before continuing to read. Those bytes are never lost.
+  - **Complete Response Size Accounting**: Running `totalRead` counts the prefix plus all subsequent chunks against `MaxDownloadBytes` (20 MB), defeating chunked streams with missing or spoofed `Content-Length`.
+  - **Stream Disposal & Cancellation**: Stream and `HttpResponseMessage` are cleanly disposed in `finally` and exception blocks; distinguishes caller cancellation (`callerToken`) from HTTP timeout (`effectiveToken`).
 - **Transient Retry Loop (`FetchWithRetriesAsync` / `ShouldRetry`):**
   - Max 3 attempts (`Retry:MaxAttempts`). Only retries when `ex.IsTransient == true` AND not in the permanent exclusion list.
-  - Eligible transient codes: `DnsResolutionFailed`, `ConnectionTimeout`, `RequestTimeout`, `HttpServerError` (`5xx`), `HttpRateLimited` (`429`), and stream interruption (`ImageDecodeFailed` thrown by `ReadBoundedStreamAsync`).
+  - Eligible transient codes: `DnsResolutionFailed`, `ConnectionTimeout`, `RequestTimeout`, `HttpServerError` (`5xx`), `HttpRateLimited` (`429`), and stream interruption (`ImageDecodeFailed` thrown by `ReadBoundedWithClassificationAsync`).
   - For `429`: respects `Retry-After` if `<= MaxRetryAfterSeconds` (3s); if server demands longer, fails immediately instead of stalling the API worker thread.
   - Otherwise computes exponential backoff `BaseDelayMs * 2^(attempt - 1)` capped at `MaxDelayMs` (1500ms) with optional ±25% jitter (`0.75 + Random.Shared.NextDouble() * 0.5`).
 
-### Module 6: Single-GET Sniffing & HTML Candidate Extraction (`RetrievalOrchestrator.cs`, `HtmlImageRetriever.cs`)
-- **Why No `HEAD` Request?** Many CDNs/image servers return `405 Method Not Allowed`, omit `Content-Type`, or behave differently on `HEAD`. `RetrievalOrchestrator.RetrieveCandidatesAsync` issues **one initial `GET`**.
-- **Sniffing Decision (`IsHtmlResponse`):**
-  1. If final URL path ends in a known image extension (`.jpg`, `.png`, `.webp`, `.svg`, etc.) -> **not HTML**.
-  2. Reads first `<= 512` bytes from seekable `MemoryStream` and rewinds (`Position = 0`).
-  3. If bytes start with binary JPEG/PNG/WebP/GIF/BMP signature -> **not HTML** (even if misconfigured server sent `Content-Type: text/html`).
-  4. If trimmed text starts with `<svg` or `<?xml` + `<svg` -> **not HTML** (passed to `ImageValidator`, which rejects as `UNSUPPORTED_CONTENT_TYPE`).
-  5. Otherwise returns `true` if `Content-Type` is `text/html` / `application/xhtml+xml` OR sample starts with/contains HTML markers (`<!doctype html`, `<html`, `<head`, `<body`, `<meta`, `<img`, `og:image`, `twitter:image`).
+### Module 6: Retrieval Orchestration, Routing & HTML Candidate Extraction (`RetrievalOrchestrator.cs`, `HtmlImageRetriever.cs`)
+- **Updated Retrieval Sequence:**
+  1. `RetrievalOrchestrator`: Initiates initial fetch via `DirectImageRetriever.FetchWithRetriesAsync(source, "Direct", allowHtml: true)` and routes the result:
+     - Google Drive URL -> routed to `GoogleDriveImageRetriever`.
+     - HTML response (`IsHtmlResponse == true`) -> routed to `HtmlImageRetriever`.
+     - Direct image -> yielded directly to `ImageValidator`.
+  2. `DirectImageRetriever`: Executes single GET, inspects initial 1 KB prefix, classifies content, continues bounded streaming, and returns `RetrievedImage`.
+  3. `HtmlImageRetriever`: Parses HTML, ranks candidates, and fetches candidate images with `allowHtml: false` (aborting immediately if a candidate returns an HTML error/hotlink page).
+  4. `GoogleDriveImageRetriever`: Handles Drive sharing URLs via public `/uc` download endpoint with confirmation-page resolution.
+- **Content-First Classification (`RetrievalOrchestrator.IsHtmlResponse`):**
+  - Binary image magic bytes (`FF D8 FF`, `89 50 4E 47`, `RIFF....WEBP`) **always take precedence** over `Content-Type` headers or URL extensions. A URL `/car.jpg` returning HTML is correctly classified as HTML; a URL `/vehicle` without extension returning JPEG is correctly classified as an image.
+  - Trimmed text starting with `<svg` or `<?xml` + `<svg` returns `false` (passed to `ImageValidator` to produce `UNSUPPORTED_CONTENT_TYPE`).
+  - If a URL with an image extension (e.g. `html-masquerade.jpg` or `/photo.jpg`) returns an HTML error page with no usable vehicle images, `RetrievalOrchestrator` maps `NO_IMAGE_FOUND` to `UNSUPPORTED_CONTENT_TYPE` so masquerading non-image files are rejected with the correct semantic code.
 - **HTML Pipeline (`HtmlImageRetriever`):**
   1. **Decoding (`DecodeHtml`):** Uses HTTP charset or regex-scans first 2048 ASCII bytes for `<meta charset=...>`, falling back to UTF-8. Registers `CodePagesEncodingProvider` for legacy charsets.
   2. **Pre-parse Fixes:** `EnsureClosedTitleTag` inserts `</title>` if unclosed (prevents `HtmlAgilityPack` swallowing `</head>`/body tags).
@@ -113,7 +125,7 @@ Read these modules in order; each builds on the previous layer.
      - `<meta property/name="twitter:image">` (excluding `:alt`) -> base score `300`.
      - For each `<img>`: skips if declared `width` or `height` is `< MinDeclaredDimension` (80). Checks `srcset`/`data-srcset` (picks largest `w` width or `x * 1000` density descriptor -> score `200`), `data-src`/`data-original`/`data-lazy-src` (score `100`), and `src` (score `100`). Adds `+50` bonus if `declaredWidth >= 400 || declaredHeight >= 300`.
      - Filters out `data:`, `javascript:`, `about:`, `#`, `.svg`, and `IgnoreUrlPatterns` matching `uri.AbsolutePath` or node `class`/`id`/`alt`.
-  5. **Ranking & Fallback (`Rank`, `RetrieveCandidatesFromHtmlAsync`):** Groups duplicate URLs keeping highest score, sorts descending, tries up to `Math.Min(3, Math.Max(1, _options.MaxCandidates))` (3) via `_directRetriever.FetchWithRetriesAsync`, and yields each successfully fetched `RetrievedImage` (`Strategy = "Html"`) lazily via `IAsyncEnumerable<RetrievedImage>`.
+  5. **Ranking & Fallback (`Rank`, `RetrieveCandidatesFromHtmlAsync`):** Groups duplicate URLs keeping highest score, sorts descending, tries up to `Math.Min(3, Math.Max(1, _options.MaxCandidates))` (3) via `_directRetriever.FetchWithRetriesAsync(candidate.Url, "Html", allowHtml: false)`, and yields each successfully fetched `RetrievedImage` (`Strategy = "Html"`). Because `allowHtml: false` is passed, candidate URLs pointing to HTML error pages abort after reading the 1 KB prefix, cleanly triggering fallback to candidate #2 without downloading megabytes of HTML.
 
 ### Module 7: Magic-Byte Inspection, Bomb Defense & Full Decode (`ImageValidator.cs`, `ImageMetadata.cs`)
 - **Why Three ImageSharp Stages + Byte Checks?** Trusting extensions or `Content-Type` invites XSS (SVG), polyglots, decompression bombs, and truncated/broken images.
@@ -395,44 +407,63 @@ flowchart TD
 
 ---
 
-### Diagram 8: Bounded Streaming & Decompression Size Cap
+### Diagram 8: Header-First 1 KB Prefix Reading & Early Content Classification
 
 ```mermaid
 flowchart TD
     Resp["2xx HttpResponseMessage (Headers Only via ResponseHeadersRead)"] --> Open["await content.ReadAsStreamAsync(effectiveToken)"]
-    Open --> Loop["Read 16 KB chunk into buffer"]
-    Loop -->|"bytesRead == 0"| Finish["Reset MemoryStream.Position = 0 & Return"]
-    Loop -->|"bytesRead > 0"| Add["totalRead += bytesRead"]
+    Open --> PrefixLoop["Read initial chunk up to 1024 bytes directly into stack buffer"]
+    PrefixLoop --> PrefixCheck{"Prefix Content Classification"}
+
+    PrefixCheck -->|"Binary Magic Bytes (JPEG, PNG, WebP)"| KeepPrefix["memoryStream = new MemoryStream(); write prefix (0..prefixCount)"]
+    PrefixCheck -->|"Unsupported Format (GIF, BMP, TIFF, ICO, AVIF)"| ErrFormat["Throw UNSUPPORTED_IMAGE_FORMAT (early abort without buffering)"]
+    PrefixCheck -->|"HTML Webpage (Content-Type or HTML tags) AND allowHtml==true"| KeepPrefix
+    PrefixCheck -->|"HTML Webpage AND allowHtml==false (Candidate Fetch)"| ErrHtmlCandidate["Throw UNSUPPORTED_CONTENT_TYPE (early abort, fall back to next candidate)"]
+    PrefixCheck -->|"Non-Image / Non-HTML (PDF, MP4, JSON, SVG)"| ErrType["Throw UNSUPPORTED_CONTENT_TYPE (early abort without buffering)"]
+
+    KeepPrefix --> BodyLoop["Read remaining 16 KB chunks from networkStream"]
+    BodyLoop -->|"bytesRead == 0 (EOF)"| Finish["Reset MemoryStream.Position = 0 & Return"]
+    BodyLoop -->|"bytesRead > 0"| Add["totalRead += bytesRead"]
     Add --> CheckCap{"totalRead > MaxDownloadBytes (20 MB)?"}
     CheckCap -->|"Yes"| Abort["Dispose MemoryStream & Throw IMAGE_TOO_LARGE"]
-    CheckCap -->|"No"| Write["memoryStream.Write(chunk, 0, bytesRead)"] --> Loop
-    Loop -->|"callerToken canceled"| AbortCancel["Dispose MemoryStream & Rethrow OperationCanceledException"]
-    Loop -->|"effectiveToken timeout"| AbortTimeout["Dispose MemoryStream & Throw REQUEST_TIMEOUT"]
-    Loop -->|"Network stream broken"| AbortCut["Dispose MemoryStream & Throw IMAGE_DECODE_FAILED (transient)"]
+    CheckCap -->|"No"| Write["memoryStream.Write(chunk, 0, bytesRead)"] --> BodyLoop
+
+    BodyLoop -->|"callerToken canceled"| AbortCancel["Dispose MemoryStream & Rethrow OperationCanceledException"]
+    BodyLoop -->|"effectiveToken timeout"| AbortTimeout["Dispose MemoryStream & Throw REQUEST_TIMEOUT"]
+    BodyLoop -->|"Network stream broken"| AbortCut["Dispose MemoryStream & Throw IMAGE_DECODE_FAILED (transient)"]
 ```
 
-**Explanation:** Attackers or broken proxies can omit `Content-Length`, spoof a tiny `Content-Length`, or send a small gzip stream that decompresses into hundreds of megabytes. Because `AutomaticDecompression` runs inside `SocketsHttpHandler`, `ReadAsStreamAsync` yields **decompressed** bytes, and our manual 16 KB loop aborts immediately the instant `totalRead` crosses `MaxDownloadBytes`.
+**Explanation:** Rather than downloading up to 20 MB before checking content, `DirectImageRetriever` reads up to 1 KB under `ResponseHeadersRead`, evaluates binary signatures and markup prefixes, and aborts immediately if the payload is an unsupported image or non-image stream. When classified as a supported image or HTML, the initial 1 KB is preserved in `MemoryStream` and subsequent chunks are read with running `totalRead` bounded by `MaxDownloadBytes = 20 MB`.
 
 ---
 
-### Diagram 9: Single-GET Content Sniffing in `RetrievalOrchestrator`
+### Diagram 9: Overall Retrieval & Routing Decision in `RetrievalOrchestrator`
 
 ```mermaid
 flowchart TD
-    Get["Single Initial GET via DirectImageRetriever (No HEAD!)"] --> CheckExt{"FinalSourceUrl ends with known image extension?"}
-    CheckExt -->|"Yes (.jpg/.png/.webp/.gif/.svg...)"| DirectYield["Yield initialFetch directly to ImageValidator"]
-    CheckExt -->|"No"| ReadPrefix["Read up to 512 bytes & rewind Position=0"]
-    ReadPrefix --> CheckBin{"Binary magic bytes? (JPEG/PNG/WebP/GIF/BMP)"}
-    CheckBin -->|"Yes"| DirectYield
-    CheckBin -->|"No"| CheckSvg{"Trimmed UTF-8 starts with '<svg' or '<?xml'+'<svg'?"}
-    CheckSvg -->|"Yes"| DirectYield
-    CheckSvg -->|"No"| CheckHtml{"Content-Type is text/html or xhtml+xml OR HTML tag sample matches?"}
-    CheckHtml -->|"Yes"| Decode["DecodeHtml(content, charset) -> Dispose initialFetch"]
-    Decode --> HtmlRet["Delegate to HtmlImageRetriever.RetrieveCandidatesFromHtmlAsync"]
-    CheckHtml -->|"No (e.g. JSON, plain text)"| DirectYield
+    In["Customer submits image URL"] --> DriveCheck{"Host is Google Drive (drive/docs.google.com)?"}
+    DriveCheck -->|"Yes"| DriveRet["Route to GoogleDriveImageRetriever.RetrieveAsync"]
+    DriveCheck -->|"No"| InitialGet["DirectImageRetriever.FetchWithRetriesAsync(allowHtml: true)"]
+
+    InitialGet --> PrefixClass["Read 1 KB prefix & classify (DirectImageRetriever)"]
+    PrefixClass -->|"Non-image / Non-HTML / Unsupported format"| ErrEarly["Early Abort (422 UNSUPPORTED_CONTENT_TYPE / UNSUPPORTED_IMAGE_FORMAT)"]
+    PrefixClass -->|"Supported Binary Image (JPEG/PNG/WebP)"| StreamImg["Stream remainder -> RetrievedImage (Strategy = 'Direct')"]
+    PrefixClass -->|"HTML Page"| StreamHtml["Stream remainder -> RetrievedImage"]
+
+    StreamImg --> ImageVal["ImageValidator.ValidateAsync (Identify, bomb bounds, pixel decode)"]
+    StreamHtml --> CheckFinalDrive{"FinalSourceUrl is Google Drive?"}
+    CheckFinalDrive -->|"Yes (Redirect to Drive)"| DriveRet
+    CheckFinalDrive -->|"No"| HtmlCandidates["HtmlImageRetriever.RetrieveCandidatesFromHtmlAsync"]
+
+    HtmlCandidates --> Extract["Extract and rank candidates (og:image, twitter:image, srcset, img)"]
+    Extract --> CandFetch["Fetch candidate with allowHtml: false"]
+    CandFetch -->|"Candidate returns valid image"| ImageVal
+    CandFetch -->|"Candidate returns HTML error page"| AbortCand["Abort after 1 KB -> Try next candidate"]
+    Extract -->|"0 usable candidates on image-extension URL"| ErrMasquerade["Throw UNSUPPORTED_CONTENT_TYPE (Hotlink/404 masquerade)"]
+    Extract -->|"0 candidates on standard webpage"| ErrNoImg["Throw NO_IMAGE_FOUND"]
 ```
 
-**Explanation:** Only **one** GET is issued initially. Even if an upstream CDN mislabels a JPEG with `Content-Type: text/html`, binary signature sniffing keeps it on the direct path. Conversely, clean extensionless image URLs and static HTML pages are accurately classified without redundant network round-trips.
+**Explanation:** `RetrievalOrchestrator` coordinates the high-level routing while `DirectImageRetriever` protects system bandwidth with 1 KB prefix classification. Note the distinction: 1 KB prefix inspection is *classification* (dispatching to HTML vs image pipeline), whereas *image validation* (dimensions, pixel decoding, memory allocator limits) is performed after full streaming by `ImageValidator`.
 
 ---
 
@@ -726,13 +757,14 @@ flowchart LR
 
 1. **Valid Direct JPEG URL Submission (`POST /api/vehicles` -> `201 Created`)**
    - `VehiclesController.Create` validates `[FromBody] CreateVehicleRequest` -> `VehicleService.CreateAsync` -> `ImageIngestionService.IngestAsync`.
-   - `UrlValidator.Validate` accepts `https://cdn.example/car.jpg` -> `DirectImageRetriever.ExecuteSingleFetchAsync` issues `GET` via `ImageRetrievalClient`, reads bounded bytes (`<= 20 MB`).
-   - `RetrievalOrchestrator.IsHtmlResponse` returns `false` -> yields `RetrievedImage` (`Strategy = "Direct"`).
+   - `UrlValidator.Validate` accepts `https://cdn.example/car.jpg` -> `DirectImageRetriever.ExecuteSingleFetchAsync` issues `GET` via `ImageRetrievalClient`, reads initial 1 KB prefix directly from `networkStream`.
+   - `ImageValidator.TryMatchBinaryImageSignature` matches `FF D8 FF`, preserves prefix in `MemoryStream`, streams remainder up to `MaxDownloadBytes`, and sets `Strategy = "Direct"`.
    - `ImageValidator.ValidateAsync` verifies `FF D8 FF` magic bytes, `FF D9` EOI tail, `IdentifyAsync` dimensions (`100..10000`, `<= 50M` pixels, `1` frame), decodes pixels with `LoadAsync<Rgba32>`, hashes SHA-256 -> `LocalFileStorage.SaveAsync` moves temp file to `vehicles/YYYY/MM/guid.jpg` -> `DbContext.SaveChangesAsync` -> `201 Created` returning `/api/images/{imageId}`.
 
-2. **Direct PNG URL With Misleading `.html` Extension & `text/plain` Header (`201 Created`)**
-   - `FinalSourceUrl` ends in `.txt` or no extension and server sends `Content-Type: text/html`.
-   - `RetrievalOrchestrator.IsHtmlResponse` reads the first 512 bytes, detects PNG signature `89 50 4E 47 0D 0A 1A 0A` in `StartsWithBinaryImageSignature`, and returns `false` immediately.
+2. **Direct PNG URL With Misleading Extension or Missing/Mismatched `Content-Type` (`201 Created`)**
+   - `FinalSourceUrl` is `/vehicle` (no extension) or `/photo.jpg` containing PNG bytes, or server sends `Content-Type: text/html`.
+   - `DirectImageRetriever.ReadBoundedWithClassificationAsync` inspects the initial 1 KB directly: detects PNG signature `89 50 4E 47 0D 0A 1A 0A` in `TryMatchBinaryImageSignature`.
+   - Binary image magic bytes take precedence over headers; streams the remaining body, and `RetrievalOrchestrator` passes it directly to `ImageValidator`.
    - `ImageValidator` inspects the actual PNG bytes, checks `IHDR` dimensions, decodes, saves as `.png`, and returns `201 Created`.
 
 3. **Valid Redirecting Image URL (`301` -> `302` -> Final `.jpg` -> `201 Created`)**
@@ -794,18 +826,18 @@ flowchart LR
 
 16. **Oversized Chunked Stream Without `Content-Length` Aborted Mid-Stream (`422 IMAGE_TOO_LARGE`)**
     - Server streams chunks totaling 25 MB with `Transfer-Encoding: chunked` and no `Content-Length`.
-    - `ReadBoundedStreamAsync` tracks `totalRead` per 16 KB read; on the chunk pushing `totalRead > 20,971,520`, throws `IMAGE_TOO_LARGE`, disposes `MemoryStream`, and drops the connection.
+    - `ReadBoundedWithClassificationAsync` tracks `totalRead` across initial 1 KB prefix and subsequent 16 KB chunks; on the chunk pushing `totalRead > 20,971,520`, throws `IMAGE_TOO_LARGE`, disposes `MemoryStream`, and drops the connection.
 
 17. **PNG Decompression Bomb Caught via `IHDR` Before Decode (`422 IMAGE_DIMENSIONS_EXCEEDED`)**
     - Malicious tiny 1 KB PNG declares `20000 x 20000` (`400M` pixels) in `IHDR` bytes `16..23`.
     - `ImageValidator.ValidateAsync` inspects `BinaryPrimitives.ReadInt32BigEndian` on bytes `16..23` immediately and throws `IMAGE_DIMENSIONS_EXCEEDED` before allocating pixel buffers.
 
-18. **Disguised SVG Renamed `.jpg` Rejected (`422 UNSUPPORTED_CONTENT_TYPE`)**
-    - `https://supplier.test/car.jpg` returns `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`.
-    - `ImageValidator.InspectSignature` does not match binary magic bytes; sees `<` / `<svg` in trimmed UTF-8 text and throws `UNSUPPORTED_CONTENT_TYPE`.
+18. **Disguised SVG or Non-Image Stream Renamed `.jpg` Rejected (`422 UNSUPPORTED_CONTENT_TYPE`)**
+    - `https://supplier.test/car.jpg` returns `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>` or a 15 MB PDF/video stream.
+    - `DirectImageRetriever.ReadBoundedWithClassificationAsync` inspects the initial 1 KB: detects text/SVG or non-image bytes; aborts immediately with `UNSUPPORTED_CONTENT_TYPE` without downloading the remaining megabytes.
 
-19. **GIF / BMP / AVIF Image Rejected (`422 UNSUPPORTED_IMAGE_FORMAT`)**
-    - Server returns valid `GIF89a`, `BM`, or `ftypavif` bytes. `InspectSignature` identifies the unsupported format explicitly (`"GIF"`, `"BMP"`, `"AVIF/HEIF"`) and throws `UNSUPPORTED_IMAGE_FORMAT` (never retried).
+19. **GIF / BMP / AVIF Image Rejected Early After Prefix (`422 UNSUPPORTED_IMAGE_FORMAT`)**
+    - Server returns valid `GIF89a`, `BM`, or `ftypavif` bytes. `ImageValidator.TryMatchBinaryImageSignature` identifies the unsupported format explicitly (`"GIF"`, `"BMP"`, `"AVIF/HEIF"`) in the first 1 KB prefix and throws `UNSUPPORTED_IMAGE_FORMAT` immediately (never retried, no megabytes buffered).
 
 20. **Truncated JPEG Missing `FF D9` EOI Marker Rejected & Retried (`422 IMAGE_DECODE_FAILED`)**
     - A JPEG starts with `FF D8 FF` but drops halfway through transfer (last 16 bytes lack `FF D9`).

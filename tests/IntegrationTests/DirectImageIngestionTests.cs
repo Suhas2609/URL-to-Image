@@ -76,11 +76,45 @@ public class DirectImageIngestionTests : IAsyncLifetime
     }
 
     [Theory]
+    [InlineData("/vehicle", "JPEG", "image/jpeg", "Direct")]
+    [InlineData("/download?id=123", "JPEG", "image/jpeg", "Direct")]
+    [InlineData("/resource", "JPEG", "image/jpeg", "Direct")]
+    [InlineData("/resource-no-ct", "JPEG", "image/jpeg", "Direct")]
+    [InlineData("/gallery/123", "WebP", "image/webp", "Html")]
+    [InlineData("/download?id=456", "PNG", "image/png", "Html")]
+    [InlineData("/image.webp", "JPEG", "image/jpeg", "Html")]
+    public async Task CreateVehicle_ContentBasedClassification_IgnoresMisleadingExtensionsAndHeaders(
+        string path,
+        string expectedFormat,
+        string expectedContentType,
+        string expectedStrategy)
+    {
+        var request = new CreateVehicleRequest
+        {
+            Make = "BMW",
+            Model = "M4",
+            Year = 2026,
+            ImageUrl = _supplier.Url(path)
+        };
+
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/vehicles", request);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        var submission = (await response.Content.ReadFromJsonAsync<ImageSubmissionResponse>())!;
+        var detail = (await _client.GetFromJsonAsync<VehicleResponse>($"/api/vehicles/{submission.VehicleId}"))!;
+
+        Assert.Equal(expectedFormat, detail.Format);
+        Assert.Equal(expectedContentType, detail.ContentType);
+        Assert.Equal(expectedStrategy, detail.RetrievalStrategy);
+    }
+
+    [Theory]
     [InlineData("/fixtures/images/corrupted.jpg", ErrorCodes.ImageDecodeFailed)]
     [InlineData("/fixtures/images/unsupported.gif", ErrorCodes.UnsupportedImageFormat)]
     [InlineData("/fixtures/images/unsupported.bmp", ErrorCodes.UnsupportedImageFormat)]
     [InlineData("/fixtures/images/vector.svg", ErrorCodes.UnsupportedContentType)]
     [InlineData("/fixtures/images/html-masquerade.jpg", ErrorCodes.UnsupportedContentType)]
+    [InlineData("/photo.jpg", ErrorCodes.UnsupportedContentType)]
     [InlineData("/fixtures/images/too-small.png", ErrorCodes.ImageTooSmall)]
     [InlineData("/fixtures/images/decompression-bomb.png", ErrorCodes.ImageDimensionsExceeded)]
     [InlineData("/status/404", ErrorCodes.HttpNotFound)]

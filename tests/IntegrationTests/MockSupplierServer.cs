@@ -106,6 +106,34 @@ public sealed class MockSupplierServer : IAsyncDisposable
         app.MapGet("/fixtures/images/html-masquerade.jpg", () => Results.Content(
             "<!DOCTYPE html><html><body><h1>Hotlink protection error</h1></body></html>",
             "text/html"));
+        app.MapGet("/photo.jpg", () => Results.Content(
+            "<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>Page Not Found</h1></body></html>",
+            "text/html"));
+        app.MapGet("/vehicle", () => Results.Bytes(ValidJpegBytes, "image/jpeg"));
+        app.MapGet("/resource", () => Results.Bytes(ValidJpegBytes, "text/html"));
+        app.MapGet("/resource-no-ct", async (HttpContext ctx) =>
+        {
+            ctx.Response.StatusCode = StatusCodes.Status200OK;
+            await ctx.Response.Body.WriteAsync(ValidJpegBytes, ctx.RequestAborted);
+        });
+        app.MapGet("/download", (HttpContext ctx) =>
+        {
+            string? id = ctx.Request.Query["id"];
+            if (string.Equals(id, "123", StringComparison.Ordinal))
+            {
+                return Results.Bytes(ValidJpegBytes, "image/jpeg");
+            }
+
+            return Results.Content(
+                "<!DOCTYPE html><html><head><meta property=\"og:image\" content=\"/fixtures/images/valid-car.png\" /></head><body><h1>Download</h1></body></html>",
+                "text/html");
+        });
+        app.MapGet("/gallery/123", () => Results.Content(
+            "<!DOCTYPE html><html><head><meta property=\"og:image\" content=\"/fixtures/images/valid-car.webp\" /></head><body><h1>Gallery 123</h1></body></html>",
+            "text/html"));
+        app.MapGet("/image.webp", () => Results.Content(
+            "<!DOCTYPE html><html><head><meta property=\"og:image\" content=\"/fixtures/images/valid-car.jpg\" /></head><body><h1>Vehicle Preview</h1></body></html>",
+            "text/html"));
 
         // 2. Redirect endpoints
         app.MapGet("/redirect/chain-start", (HttpContext ctx) =>
@@ -190,6 +218,48 @@ public sealed class MockSupplierServer : IAsyncDisposable
             await ctx.Response.Body.WriteAsync(payload, ctx.RequestAborted);
         });
 
+        app.MapGet("/stream/oversize-non-image", async (HttpContext ctx) =>
+        {
+            ctx.Response.StatusCode = StatusCodes.Status200OK;
+            ctx.Response.ContentType = "application/pdf";
+            byte[] block = new byte[32 * 1024];
+            Encoding.ASCII.GetBytes("%PDF-1.7\n").CopyTo(block, 0);
+
+            for (int i = 0; i < 64; i++) // 2 MB total (> 512 KB cap; prefix check aborts before hitting size cap)
+            {
+                await ctx.Response.Body.WriteAsync(block, ctx.RequestAborted);
+                await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+            }
+        });
+
+        app.MapGet("/stream/oversize-gif", async (HttpContext ctx) =>
+        {
+            ctx.Response.StatusCode = StatusCodes.Status200OK;
+            ctx.Response.ContentType = "image/gif";
+            byte[] block = new byte[32 * 1024];
+            Encoding.ASCII.GetBytes("GIF89a").CopyTo(block, 0);
+
+            for (int i = 0; i < 64; i++) // 2 MB total (> 512 KB cap; prefix check rejects GIF before hitting size cap)
+            {
+                await ctx.Response.Body.WriteAsync(block, ctx.RequestAborted);
+                await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+            }
+        });
+
+        app.MapGet("/stream/oversize-html", async (HttpContext ctx) =>
+        {
+            ctx.Response.StatusCode = StatusCodes.Status200OK;
+            ctx.Response.ContentType = "text/html";
+            byte[] block = new byte[32 * 1024];
+            Encoding.UTF8.GetBytes("<!DOCTYPE html><html><body><p>").CopyTo(block, 0);
+
+            for (int i = 0; i < 64; i++) // 2 MB total HTML
+            {
+                await ctx.Response.Body.WriteAsync(block, ctx.RequestAborted);
+                await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+            }
+        });
+
         app.MapGet("/slow/timeout", async (HttpContext ctx) =>
         {
             await Task.Delay(TimeSpan.FromSeconds(10), ctx.RequestAborted);
@@ -200,6 +270,21 @@ public sealed class MockSupplierServer : IAsyncDisposable
         string htmlDir = ResolveFixturesHtmlDir();
         app.MapGet("/fixtures/html/{name}", async (string name, HttpContext ctx) =>
         {
+            if (string.Equals(name, "candidate-returns-oversize-html.html", StringComparison.OrdinalIgnoreCase))
+            {
+                string candidateHtml = """
+                    <!DOCTYPE html>
+                    <html>
+                    <head><meta property="og:image" content="/stream/oversize-html" /></head>
+                    <body><img src="/fixtures/images/valid-car.jpg" width="640" height="400" alt="Vehicle" /></body>
+                    </html>
+                    """;
+                ctx.Response.StatusCode = StatusCodes.Status200OK;
+                ctx.Response.ContentType = "text/html; charset=utf-8";
+                await ctx.Response.WriteAsync(candidateHtml);
+                return;
+            }
+
             if (string.Equals(name, "charset-iso.html", StringComparison.OrdinalIgnoreCase))
             {
                 string isoHtml = $"<html><head><meta charset=\"iso-8859-1\"></head><body><h1>Citroën</h1><img src=\"/fixtures/images/valid-car.jpg\" width=\"640\" height=\"400\" alt=\"Citroën Coupé\"/></body></html>";

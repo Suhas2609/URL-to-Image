@@ -1713,6 +1713,7 @@ using System.Security.Authentication;
 using Microsoft.Extensions.Options;
 using VehicleImage.Api.Configuration;
 using VehicleImage.Api.Exceptions;
+using VehicleImage.Api.ImageProcessing;
 using VehicleImage.Api.Models;
 using VehicleImage.Api.Security;
 
@@ -1721,6 +1722,7 @@ namespace VehicleImage.Api.Retrieval;
 public sealed class DirectImageRetriever
 {
     public const string HttpClientName = "ImageRetrievalClient";
+    internal const int ClassificationPrefixBytes = 1024;
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly UrlValidator _urlValidator;
@@ -1745,7 +1747,8 @@ public sealed class DirectImageRetriever
     internal async Task<(RetrievedImage Image, string? Charset)> FetchWithRetriesAsync(
         Uri source,
         string strategyName,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowHtml = true)
     {
         ArgumentNullException.ThrowIfNull(source);
 
@@ -1757,7 +1760,7 @@ public sealed class DirectImageRetriever
             attempt++;
             try
             {
-                return await ExecuteSingleFetchAsync(source, strategyName, cancellationToken);
+                return await ExecuteSingleFetchAsync(source, strategyName, allowHtml, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1830,6 +1833,7 @@ public sealed class DirectImageRetriever
     private async Task<(RetrievedImage Image, string? Charset)> ExecuteSingleFetchAsync(
         Uri source,
         string strategyName,
+        bool allowHtml,
         CancellationToken cancellationToken)
     {
         Uri currentUri = _urlValidator.Validate(source.OriginalString);
@@ -1895,8 +1899,10 @@ public sealed class DirectImageRetriever
                 string? mediaType = response.Content.Headers.ContentType?.MediaType;
                 string? charSet = response.Content.Headers.ContentType?.CharSet;
 
-                MemoryStream buffer = await ReadBoundedStreamAsync(
+                MemoryStream buffer = await ReadBoundedWithClassificationAsync(
                     response.Content,
+                    mediaType,
+                    allowHtml,
                     _retrievalOptions.MaxDownloadBytes,
                     effectiveToken,
                     cancellationToken);
@@ -1971,18 +1977,70 @@ public sealed class DirectImageRetriever
         }
     }
 
-    private static async Task<MemoryStream> ReadBoundedStreamAsync(
+    private static async Task<MemoryStream> ReadBoundedWithClassificationAsync(
         HttpContent content,
+        string? mediaType,
+        bool allowHtml,
         long maxBytes,
         CancellationToken effectiveToken,
         CancellationToken callerToken)
     {
-        var memoryStream = new MemoryStream();
+        MemoryStream? memoryStream = null;
         try
         {
             await using Stream networkStream = await content.ReadAsStreamAsync(effectiveToken);
             byte[] chunk = new byte[16 * 1024];
+            int prefixCap = Math.Min(ClassificationPrefixBytes, chunk.Length);
+            int prefixCount = 0;
             long totalRead = 0;
+
+            while (prefixCount < prefixCap)
+            {
+                int bytesRead = await networkStream.ReadAsync(
+                    chunk.AsMemory(prefixCount, prefixCap - prefixCount),
+                    effectiveToken);
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+
+                totalRead += bytesRead;
+                if (totalRead > maxBytes)
+                {
+                    throw ImageIngestionException.ImageTooLarge(maxBytes);
+                }
+
+                prefixCount += bytesRead;
+            }
+
+            if (prefixCount == 0)
+            {
+                return new MemoryStream(0);
+            }
+
+            ReadOnlySpan<byte> prefix = chunk.AsSpan(0, prefixCount);
+            if (ImageValidator.TryMatchBinaryImageSignature(
+                prefix,
+                out _,
+                out _,
+                out _,
+                out string? unsupportedFormatName))
+            {
+                if (unsupportedFormatName is not null)
+                {
+                    throw ImageIngestionException.UnsupportedImageFormat(unsupportedFormatName);
+                }
+            }
+            else if (!allowHtml || !RetrievalOrchestrator.IsHtmlPayload(mediaType, prefix))
+            {
+                throw ImageValidator.IsLikelyTextMarkupOrJson(prefix)
+                    ? ImageIngestionException.UnsupportedContentType(
+                        "The retrieved resource is HTML, XML, SVG or JSON rather than a binary image.")
+                    : ImageIngestionException.UnsupportedContentType();
+            }
+
+            memoryStream = new MemoryStream();
+            memoryStream.Write(chunk, 0, prefixCount);
 
             while (true)
             {
@@ -2006,22 +2064,22 @@ public sealed class DirectImageRetriever
         }
         catch (OperationCanceledException) when (callerToken.IsCancellationRequested)
         {
-            memoryStream.Dispose();
+            memoryStream?.Dispose();
             throw;
         }
         catch (OperationCanceledException ex)
         {
-            memoryStream.Dispose();
+            memoryStream?.Dispose();
             throw ImageIngestionException.RequestTimeout(inner: ex);
         }
         catch (ImageIngestionException)
         {
-            memoryStream.Dispose();
+            memoryStream?.Dispose();
             throw;
         }
         catch (Exception ex)
         {
-            memoryStream.Dispose();
+            memoryStream?.Dispose();
             throw ImageIngestionException.ImageDecodeFailed(
                 "The image transfer was interrupted before completion.",
                 isTransient: true,
@@ -2163,7 +2221,8 @@ public sealed partial class HtmlImageRetriever
                 var (fetched, _) = await _directRetriever.FetchWithRetriesAsync(
                     candidate.Url,
                     "Html",
-                    cancellationToken);
+                    cancellationToken,
+                    allowHtml: false);
 
                 retrieved = new RetrievedImage
                 {
@@ -2608,6 +2667,8 @@ public sealed partial class HtmlImageRetriever
 ```csharp
 using System.Runtime.CompilerServices;
 using System.Text;
+using VehicleImage.Api.Exceptions;
+using VehicleImage.Api.ImageProcessing;
 using VehicleImage.Api.Models;
 
 namespace VehicleImage.Api.Retrieval;
@@ -2616,13 +2677,16 @@ public sealed class RetrievalOrchestrator
 {
     private readonly DirectImageRetriever _directRetriever;
     private readonly HtmlImageRetriever _htmlRetriever;
+    private readonly GoogleDriveImageRetriever _googleDriveRetriever;
 
     public RetrievalOrchestrator(
         DirectImageRetriever directRetriever,
-        HtmlImageRetriever htmlRetriever)
+        HtmlImageRetriever htmlRetriever,
+        GoogleDriveImageRetriever googleDriveRetriever)
     {
         _directRetriever = directRetriever;
         _htmlRetriever = htmlRetriever;
+        _googleDriveRetriever = googleDriveRetriever;
     }
 
     public async IAsyncEnumerable<RetrievedImage> RetrieveCandidatesAsync(
@@ -2631,15 +2695,43 @@ public sealed class RetrievalOrchestrator
     {
         ArgumentNullException.ThrowIfNull(source);
 
+        if (_googleDriveRetriever.CanHandle(source))
+        {
+            yield return await _googleDriveRetriever.RetrieveAsync(source, cancellationToken);
+            yield break;
+        }
+
         // Single initial GET — no mandatory HEAD request (Decision 4 & Section 9.2)
         var (initialFetch, charset) = await _directRetriever.FetchWithRetriesAsync(
             source,
             "Direct",
-            cancellationToken);
+            cancellationToken,
+            allowHtml: true);
 
         bool transferredOwnership = false;
         try
         {
+            if (_googleDriveRetriever.CanHandle(initialFetch.FinalSourceUrl))
+            {
+                Uri redirectedDriveUrl = initialFetch.FinalSourceUrl;
+                initialFetch.Dispose();
+                transferredOwnership = true;
+
+                RetrievedImage driveImage = await _googleDriveRetriever.RetrieveAsync(
+                    redirectedDriveUrl,
+                    cancellationToken);
+                yield return new RetrievedImage
+                {
+                    Content = driveImage.Content,
+                    ContentType = driveImage.ContentType,
+                    SourceUrl = source,
+                    FinalSourceUrl = driveImage.FinalSourceUrl,
+                    FileSize = driveImage.FileSize,
+                    Strategy = driveImage.Strategy
+                };
+                yield break;
+            }
+
             if (IsHtmlResponse(initialFetch))
             {
                 string html = HtmlImageRetriever.DecodeHtml(initialFetch.Content, charset);
@@ -2647,13 +2739,33 @@ public sealed class RetrievalOrchestrator
                 initialFetch.Dispose();
                 transferredOwnership = true;
 
-                await foreach (var htmlCandidate in _htmlRetriever.RetrieveCandidatesFromHtmlAsync(
-                    html,
-                    source,
-                    finalPageUrl,
-                    cancellationToken))
+                await using var enumerator = _htmlRetriever
+                    .RetrieveCandidatesFromHtmlAsync(html, source, finalPageUrl, cancellationToken)
+                    .GetAsyncEnumerator(cancellationToken);
+
+                while (true)
                 {
-                    yield return htmlCandidate;
+                    bool hasNext;
+                    try
+                    {
+                        hasNext = await enumerator.MoveNextAsync();
+                    }
+                    catch (ImageIngestionException ex) when (
+                        ex.Code == ErrorCodes.NoImageFound &&
+                        (HasKnownImageExtension(finalPageUrl) || HasKnownImageExtension(source)))
+                    {
+                        // A URL with an image extension returning an HTML error/interstitial page with no usable images
+                        // should report UNSUPPORTED_CONTENT_TYPE rather than NO_IMAGE_FOUND.
+                        throw ImageIngestionException.UnsupportedContentType(
+                            "The retrieved resource is HTML, XML, SVG or JSON rather than a binary image.");
+                    }
+
+                    if (!hasNext)
+                    {
+                        break;
+                    }
+
+                    yield return enumerator.Current;
                 }
 
                 yield break;
@@ -2671,44 +2783,44 @@ public sealed class RetrievalOrchestrator
         }
     }
 
-    private static bool IsHtmlResponse(RetrievedImage retrieved)
+    internal static bool IsHtmlResponse(RetrievedImage retrieved)
     {
-        if (HasKnownImageExtension(retrieved.FinalSourceUrl))
-        {
-            return false;
-        }
-
         if (retrieved.Content.CanSeek)
         {
             retrieved.Content.Position = 0;
         }
 
-        Span<byte> prefix = stackalloc byte[(int)Math.Min(512, retrieved.Content.Length)];
+        Span<byte> prefix = stackalloc byte[(int)Math.Min(1024, retrieved.Content.Length)];
         int read = retrieved.Content.Read(prefix);
         if (retrieved.Content.CanSeek)
         {
             retrieved.Content.Position = 0;
         }
 
-        prefix = prefix[..read];
+        return IsHtmlPayload(retrieved.ContentType, prefix[..read]);
+    }
 
-        // If magic bytes match binary image formats, it is NOT HTML regardless of Content-Type header
-        if (StartsWithBinaryImageSignature(prefix))
+    internal static bool IsHtmlPayload(string? contentType, ReadOnlySpan<byte> prefix)
+    {
+        if (prefix.IsEmpty)
+        {
+            return IsHtmlMediaType(contentType);
+        }
+
+        // Binary image magic bytes always take precedence over Content-Type or URL extension
+        if (ImageValidator.TryMatchBinaryImageSignature(prefix, out _, out _, out _, out _))
         {
             return false;
         }
 
         // If magic bytes are SVG, let ImageValidator reject it as UNSUPPORTED_CONTENT_TYPE
         string sample = Encoding.UTF8.GetString(prefix).TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
-        if (sample.StartsWith("<svg", StringComparison.OrdinalIgnoreCase) ||
-            (sample.StartsWith("<?xml", StringComparison.OrdinalIgnoreCase) &&
-             sample.Contains("<svg", StringComparison.OrdinalIgnoreCase)))
+        if (IsSvgSample(sample))
         {
             return false;
         }
 
-        return string.Equals(retrieved.ContentType, "text/html", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(retrieved.ContentType, "application/xhtml+xml", StringComparison.OrdinalIgnoreCase) ||
+        return IsHtmlMediaType(contentType) ||
                sample.StartsWith("<!doctype html", StringComparison.OrdinalIgnoreCase) ||
                sample.StartsWith("<html", StringComparison.OrdinalIgnoreCase) ||
                sample.StartsWith("<head", StringComparison.OrdinalIgnoreCase) ||
@@ -2720,40 +2832,21 @@ public sealed class RetrievalOrchestrator
                sample.Contains("twitter:image", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsHtmlMediaType(string? contentType) =>
+        string.Equals(contentType, "text/html", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(contentType, "application/xhtml+xml", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSvgSample(string trimmedSample) =>
+        trimmedSample.StartsWith("<svg", StringComparison.OrdinalIgnoreCase) ||
+        (trimmedSample.StartsWith("<?xml", StringComparison.OrdinalIgnoreCase) &&
+         trimmedSample.Contains("<svg", StringComparison.OrdinalIgnoreCase));
+
     private static bool HasKnownImageExtension(Uri uri)
     {
         return Path.GetExtension(uri.AbsolutePath).ToLowerInvariant() is
             ".jpg" or ".jpeg" or ".png" or ".webp" or ".gif" or ".bmp" or
             ".tiff" or ".tif" or ".ico" or ".svg" or ".avif" or ".heic";
     }
-
-    private static bool StartsWithBinaryImageSignature(ReadOnlySpan<byte> header)
-    {
-        // JPEG
-        if (header.Length >= 3 && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF)
-            return true;
-
-        // PNG
-        if (header.Length >= 8 && header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47)
-            return true;
-
-        // WebP
-        if (header.Length >= 12 &&
-            header[0] == (byte)'R' && header[1] == (byte)'I' && header[2] == (byte)'F' && header[3] == (byte)'F' &&
-            header[8] == (byte)'W' && header[9] == (byte)'E' && header[10] == (byte)'B' && header[11] == (byte)'P')
-            return true;
-
-        // GIF
-        if (header.Length >= 6 && header[0] == (byte)'G' && header[1] == (byte)'I' && header[2] == (byte)'F')
-            return true;
-
-        // BMP
-        if (header.Length >= 2 && header[0] == (byte)'B' && header[1] == (byte)'M')
-            return true;
-
-        return false;
-    }
-
 }
 ```
 
@@ -2967,13 +3060,49 @@ public sealed class ImageValidator
 
     private static (ImageFormatKind Kind, string ContentType, string Extension) InspectSignature(ReadOnlySpan<byte> header)
     {
+        if (TryMatchBinaryImageSignature(
+            header,
+            out ImageFormatKind kind,
+            out string contentType,
+            out string extension,
+            out string? unsupportedFormatName))
+        {
+            if (unsupportedFormatName is not null)
+            {
+                throw ImageIngestionException.UnsupportedImageFormat(unsupportedFormatName);
+            }
+
+            return (kind, contentType, extension);
+        }
+
+        // Check for HTML, XML, SVG, or JSON text content -> UNSUPPORTED_CONTENT_TYPE
+        if (IsLikelyTextMarkupOrJson(header))
+        {
+            throw ImageIngestionException.UnsupportedContentType(
+                "The retrieved resource is HTML, XML, SVG or JSON rather than a binary image.");
+        }
+
+        throw ImageIngestionException.UnsupportedContentType();
+    }
+
+    internal static bool TryMatchBinaryImageSignature(
+        ReadOnlySpan<byte> header,
+        out ImageFormatKind kind,
+        out string contentType,
+        out string extension,
+        out string? unsupportedFormatName)
+    {
         // JPEG: FF D8 FF
         if (header.Length >= 3 &&
             header[0] == 0xFF &&
             header[1] == 0xD8 &&
             header[2] == 0xFF)
         {
-            return (ImageFormatKind.Jpeg, "image/jpeg", ".jpg");
+            kind = ImageFormatKind.Jpeg;
+            contentType = "image/jpeg";
+            extension = ".jpg";
+            unsupportedFormatName = null;
+            return true;
         }
 
         // PNG: 89 50 4E 47 0D 0A 1A 0A
@@ -2987,7 +3116,11 @@ public sealed class ImageValidator
             header[6] == 0x1A &&
             header[7] == 0x0A)
         {
-            return (ImageFormatKind.Png, "image/png", ".png");
+            kind = ImageFormatKind.Png;
+            contentType = "image/png";
+            extension = ".png";
+            unsupportedFormatName = null;
+            return true;
         }
 
         // WebP: "RIFF" + 4 size bytes + "WEBP"
@@ -3001,8 +3134,16 @@ public sealed class ImageValidator
             header[10] == (byte)'B' &&
             header[11] == (byte)'P')
         {
-            return (ImageFormatKind.WebP, "image/webp", ".webp");
+            kind = ImageFormatKind.WebP;
+            contentType = "image/webp";
+            extension = ".webp";
+            unsupportedFormatName = null;
+            return true;
         }
+
+        kind = default;
+        contentType = string.Empty;
+        extension = string.Empty;
 
         // Recognised but unsupported image formats -> UNSUPPORTED_IMAGE_FORMAT
         // GIF87a or GIF89a
@@ -3014,7 +3155,8 @@ public sealed class ImageValidator
             (header[4] == (byte)'7' || header[4] == (byte)'9') &&
             header[5] == (byte)'a')
         {
-            throw ImageIngestionException.UnsupportedImageFormat("GIF");
+            unsupportedFormatName = "GIF";
+            return true;
         }
 
         // BMP: "BM"
@@ -3022,7 +3164,8 @@ public sealed class ImageValidator
             header[0] == (byte)'B' &&
             header[1] == (byte)'M')
         {
-            throw ImageIngestionException.UnsupportedImageFormat("BMP");
+            unsupportedFormatName = "BMP";
+            return true;
         }
 
         // TIFF: "II*\0" or "MM\0*"
@@ -3030,7 +3173,8 @@ public sealed class ImageValidator
             ((header[0] == 0x49 && header[1] == 0x49 && header[2] == 0x2A && header[3] == 0x00) ||
              (header[0] == 0x4D && header[1] == 0x4D && header[2] == 0x00 && header[3] == 0x2A)))
         {
-            throw ImageIngestionException.UnsupportedImageFormat("TIFF");
+            unsupportedFormatName = "TIFF";
+            return true;
         }
 
         // ICO: 00 00 01 00
@@ -3040,7 +3184,8 @@ public sealed class ImageValidator
             header[2] == 0x01 &&
             header[3] == 0x00)
         {
-            throw ImageIngestionException.UnsupportedImageFormat("ICO");
+            unsupportedFormatName = "ICO";
+            return true;
         }
 
         // ISO BMFF (AVIF / HEIC): bytes 4..7 == "ftyp"
@@ -3050,22 +3195,22 @@ public sealed class ImageValidator
             header[6] == (byte)'y' &&
             header[7] == (byte)'p')
         {
-            throw ImageIngestionException.UnsupportedImageFormat("AVIF/HEIF");
+            unsupportedFormatName = "AVIF/HEIF";
+            return true;
         }
 
-        // Check for HTML, XML, SVG, or JSON text content -> UNSUPPORTED_CONTENT_TYPE
+        unsupportedFormatName = null;
+        return false;
+    }
+
+    internal static bool IsLikelyTextMarkupOrJson(ReadOnlySpan<byte> header)
+    {
         string textSample = Encoding.UTF8.GetString(header).TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
-        if (textSample.StartsWith('<') ||
-            textSample.Contains("<svg", StringComparison.OrdinalIgnoreCase) ||
-            textSample.Contains("<html", StringComparison.OrdinalIgnoreCase) ||
-            textSample.StartsWith('{') ||
-            textSample.StartsWith('['))
-        {
-            throw ImageIngestionException.UnsupportedContentType(
-                "The retrieved resource is HTML, XML, SVG or JSON rather than a binary image.");
-        }
-
-        throw ImageIngestionException.UnsupportedContentType();
+        return textSample.StartsWith('<') ||
+               textSample.Contains("<svg", StringComparison.OrdinalIgnoreCase) ||
+               textSample.Contains("<html", StringComparison.OrdinalIgnoreCase) ||
+               textSample.StartsWith('{') ||
+               textSample.StartsWith('[');
     }
 
     private static bool HasValidJpegEndOfImage(Stream content)

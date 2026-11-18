@@ -153,9 +153,7 @@ sequenceDiagram
     HttpHandler->>Google: GET /download?id=... (drive.usercontent.google.com)
     Google-->>HttpHandler: HTTP 200 OK (image/jpeg, 153,168 bytes binary)
     HttpHandler-->>DirectRetriever: HttpResponseMessage (capped at 20MB)
-    DirectRetriever-->>DriveRetriever: RetrievedImage (Stream, ContentType: image/jpeg)
-
-    Note over DriveRetriever: Verify !IsHtmlResponse(image)<br/>Rewrap SourceUrl to customer URL
+    Note over DriveRetriever: Verify !RetrievalOrchestrator.IsHtmlResponse(image)<br/>Rewrap SourceUrl to customer URL
     DriveRetriever-->>Orchestrator: Yield RetrievedImage
     Orchestrator-->>Ingestion: Yield candidate
 
@@ -259,6 +257,6 @@ Upload the CSV via the **Bulk Import Vehicles (CSV)** panel. The Google Drive ro
 
 ### Q4: What happens if a supplier uploads a 500 MB video or malicious zip file named with a `.jpg` link?
 > **Answer**: Defense in depth protects the system across three layers:
-> 1. **Size check**: The stream is read through `DirectImageRetriever` which enforces a hard 20 MB limit via `BoundedReadStream`. If the file exceeds 20 MB, it aborts immediately with `IMAGE_TOO_LARGE`.
-> 2. **Header & Magic byte check**: `ImageValidator` inspects the initial 16 bytes for valid JPEG, PNG, or WebP binary signatures. A video, ZIP, or executable will fail with `UNSUPPORTED_IMAGE_FORMAT`.
-> 3. **Full decode check**: `ImageSharp` decodes the full image structure and dimensions. Corrupted files or file-format polyglots are rejected with `IMAGE_DECODE_FAILED`.
+> 1. **Header-first 1 KB prefix classification & size bounds**: `DirectImageRetriever.ReadBoundedWithClassificationAsync` sniffs the first 1 KB. A 500 MB video, ZIP, or non-image binary file is detected as having neither a valid image signature nor HTML and aborts early after reading only 1 KB with `UNSUPPORTED_CONTENT_TYPE`, without downloading the remaining 499.9 MB. If an oversized file starts with an image header, `totalRead` counts prefix + streamed chunks and aborts immediately upon reaching 20 MB (`MaxDownloadBytes`) with `IMAGE_TOO_LARGE`.
+> 2. **Magic byte & format check**: `ImageValidator` inspects the initial 1 KB for valid JPEG, PNG, or WebP binary signatures (`TryMatchBinaryImageSignature`). Other formats like GIF, BMP, TIFF, or AVIF are rejected with `UNSUPPORTED_IMAGE_FORMAT`.
+> 3. **Full decode check**: `ImageSharp` decodes the full image structure and dimensions in `ImageValidator.ValidateAsync`. Corrupted files, truncated scans, or file-format polyglots are rejected with `IMAGE_DECODE_FAILED`.

@@ -40,67 +40,75 @@ How the API boots, validates config before accepting traffic, shapes validation 
 
 ---
 
-## Day 2: URL Policy Validation, Streaming HTTP Retrieval & Retries
+## Day 2: URL Policy Validation & Bounded Streaming HTTP Retrieval (`DirectImageRetriever`)
 
 ### Focus
-How basic URL policy validation (`UrlValidator`), manual redirects, `SocketsHttpHandler` HTTP safeguards, chunked stream caps, and selective retries work together.
+How basic URL policy validation (`UrlValidator`), manual redirects, `SocketsHttpHandler` HTTP safeguards, 1 KB prefix classification (`ReadBoundedWithClassificationAsync`), chunked stream caps, and selective retries work together.
 
 ### Files & Methods to Read
 1. `backend/VehicleImage.Api/Security/UrlValidator.cs` (`Validate`, `ValidateRedirectTarget`, `ValidateUriPolicy`, `RedactForLogging`)
 2. `backend/VehicleImage.Api/Program.cs` (`ImageRetrievalClient` `SocketsHttpHandler` configuration)
-3. `backend/VehicleImage.Api/Retrieval/DirectImageRetriever.cs` (`FetchWithRetriesAsync`, `ShouldRetry`, `ExecuteSingleFetchAsync`, `ReadBoundedStreamAsync`)
+3. `backend/VehicleImage.Api/Retrieval/DirectImageRetriever.cs` (`FetchWithRetriesAsync`, `ShouldRetry`, `ExecuteSingleFetchAsync`, `ReadBoundedWithClassificationAsync`)
+4. `backend/VehicleImage.Api/ImageProcessing/ImageValidator.cs` (`TryMatchBinaryImageSignature`, `IsLikelyTextMarkupOrJson`)
 
 ### Concepts to Master
 - Why `UrlValidator` rejects `localhost`/`*.localhost`, loopback IP literals (`127.0.0.1`, `[::1]`), embedded `UserInfo`, control characters, non-HTTP/HTTPS schemes, and non-`80`/`443` ports both initially and on redirect targets.
 - Why `AllowAutoRedirect` and `UseCookies` are disabled on `SocketsHttpHandler`.
 - Why `HttpClient.Timeout` is `InfiniteTimeSpan` while `DirectImageRetriever` creates per-attempt linked timeout CTS.
-- How `ReadBoundedStreamAsync` defeats missing/spoofed `Content-Length` headers and gzip bombs.
+- **Header-First 1 KB Prefix Classification:** How `ReadBoundedWithClassificationAsync` sniffs the first 1024 bytes during streaming to classify binary images vs HTML vs unsupported content, aborting non-images and unsupported formats early.
+- **Prefix Preservation & Full Accounting:** How the first 1 KB is written to `MemoryStream` before reading the remainder, and how `totalRead` bounds prefix + chunks against `MaxImageBytes` (20 MB) or `MaxHtmlBytes` (2 MB).
+- How `allowHtml: false` ensures candidate image fetches abort after 1 KB if a candidate URL unexpectedly returns an HTML error page.
 
 ### Diagrams to Redraw From Memory
 - Diagram 4: URL Policy Validation & Retrieval Flow
 - Diagram 5: Redirect Hop Validation & `SocketsHttpHandler` Safeguards
 - Diagram 6: Manual Redirect Validation Loop
-- Diagram 7 & Diagram 8: Retry Decision + Bounded Streaming Cap
+- Diagram 7: Retry Decision & Backoff Flow
+- Diagram 8: Header-First 1 KB Prefix Reading & Early Content Classification
 
 ### Practice Questions
-- Q3.1, Q3.2, Q3.3, Q3.4, Q4.1, Q4.2, Q4.3
+- Q3.1, Q3.2, Q3.3, Q4.1, Q4.2, Q4.3, Q5.3, Q5.4, Q5.5, Q5.6
 
 ### Verification Exercise
 1. Trace `POST /api/vehicles` with `http://localhost/car.jpg` and with `https://example.com:8443/car.jpg` step-by-step through `UrlValidator.Validate` and `ValidateUriPolicy`.
-2. Read `tests/UnitTests/UrlValidatorTests.cs` and `tests/IntegrationTests/UrlValidationTests.cs` to see every scheme, port, localhost, loopback, and redirect validation test case.
+2. Inspect `tests/IntegrationTests/StreamingLimitTests.cs` to trace how early abort terminates oversized non-image streams after reading only 1 KB.
 
 ---
 
-## Day 3: Single-GET Sniffing, HTML Extraction, Magic Bytes & ImageSharp Validation
+## Day 3: Pipeline Routing, HTML Extraction, Google Drive & Image Validation
 
 ### Focus
-Classifying images vs HTML in one GET, extracting/ranking HTML candidates, rejecting disguised SVGs/bombs/truncated JPEGs, and storing safely on disk.
+Mastering the 5-step retrieval pipeline: (1) `RetrievalOrchestrator` routing, (2) `DirectImageRetriever` streaming, (3) `HtmlImageRetriever` parsing with `allowHtml: false`, (4) `GoogleDriveImageRetriever` direct export, and (5) end-to-end format/dimension validation in `ImageValidator`.
 
 ### Files & Methods to Read
-1. `backend/VehicleImage.Api/Retrieval/RetrievalOrchestrator.cs` (`RetrieveCandidatesAsync`, `IsHtmlResponse`, `StartsWithBinaryImageSignature`)
-2. `backend/VehicleImage.Api/Retrieval/HtmlImageRetriever.cs` (`RetrieveCandidatesFromHtmlAsync`, `ExtractCandidates`, `Rank`, `DecodeHtml`, `IsHtmlErrorPage`)
-3. `backend/VehicleImage.Api/ImageProcessing/ImageValidator.cs` (`ValidateAsync`, `InspectSignature`, `HasValidJpegEndOfImage`)
-4. `backend/VehicleImage.Api/Storage/LocalFileStorage.cs` (`SaveAsync`, `ResolveSafeFullPath`, `TryDeleteTempFile`)
-5. `backend/VehicleImage.Api/Services/ImageIngestionService.cs` (`IngestAsync`)
+1. `backend/VehicleImage.Api/Retrieval/RetrievalOrchestrator.cs` (`RetrieveCandidatesAsync`, `IsHtmlResponse`, `HasKnownImageExtension`)
+2. `backend/VehicleImage.Api/Retrieval/DirectImageRetriever.cs` (`FetchWithRetriesAsync`, `ReadBoundedWithClassificationAsync`)
+3. `backend/VehicleImage.Api/Retrieval/HtmlImageRetriever.cs` (`RetrieveCandidatesFromHtmlAsync`, `ExtractCandidates`, `Rank`, `DecodeHtml`, `IsHtmlErrorPage`)
+4. `backend/VehicleImage.Api/Retrieval/GoogleDriveImageRetriever.cs` (`TryExtractFileId`, `RetrieveDriveImageAsync`)
+5. `backend/VehicleImage.Api/ImageProcessing/ImageValidator.cs` (`ValidateAsync`, `InspectSignature`, `TryMatchBinaryImageSignature`, `IsLikelyTextMarkupOrJson`, `HasValidJpegEndOfImage`)
+6. `backend/VehicleImage.Api/Storage/LocalFileStorage.cs` (`SaveAsync`, `ResolveSafeFullPath`, `TryDeleteTempFile`)
+7. `backend/VehicleImage.Api/Services/ImageIngestionService.cs` (`IngestAsync`)
 
-### Concepts to Master
-- Precedence in `IsHtmlResponse` (extension -> binary magic bytes -> `<svg` guard -> HTML markers/Content-Type).
-- Candidate ranking scores (`og:image=400`, `twitter:image=300`, `srcset=200`, `data-src/img=100`, `+50` large dims) and lazy `IAsyncEnumerable` fallback (`MaxCandidates <= 3`).
-- Why `ImageValidator` runs signature -> JPEG EOI / PNG `IHDR` -> `IdentifyAsync` -> bounded `LoadAsync<Rgba32>` -> `SHA256`.
-- Atomic `.tmp -> File.Move` writes and traversal guards in `LocalFileStorage`.
+### Concepts to Master (The 5-Step Retrieval Sequence)
+1. **`RetrievalOrchestrator` Routing:** Initial fetch via `DirectImageRetriever.FetchWithRetriesAsync(..., allowHtml: true)`; routes Google Drive URLs directly to `GoogleDriveImageRetriever`; uses `IsHtmlResponse` to branch between direct image validation and `HtmlImageRetriever`.
+2. **`DirectImageRetriever` Streaming:** GET with `ResponseHeadersRead`, 1 KB prefix sniffing, early rejection on unsupported formats, prefix preservation into `MemoryStream`, bounded remainder reading.
+3. **`HtmlImageRetriever` Candidate Extraction:** Decoding HTML, repairing unclosed `<title>`, filtering/scoring `og:image`, `twitter:image`, and `<img>` tags, and fetching candidates with `allowHtml: false` so candidate error pages abort after 1 KB.
+4. **Google Drive Retrieval:** Parsing file IDs from `drive.google.com/file/d/{id}` or `id={id}` links, constructing `drive.google.com/uc?export=download&id={id}`, and retrieving binary image bytes without HTML preview wrappers.
+5. **Complete End-to-End Image Validation:** Strict signature matching (JPEG, PNG, WebP) -> structural bounds & JPEG EOI -> `Image.IdentifyAsync` dimension limits -> full `Image.LoadAsync<Rgba32>` pixel decode -> `SHA256` hashing and atomic storage.
 
 ### Diagrams to Redraw From Memory
-- Diagram 9: Single-GET Content Sniffing
+- Diagram 8: Header-First 1 KB Prefix Reading & Early Content Classification
+- Diagram 9: Overall Retrieval & Routing Decision in `RetrievalOrchestrator`
 - Diagram 10: HTML Extraction, Ranking & Multi-Candidate Fallback
 - Diagram 11: `ImageValidator` Validation Stages
 - Diagram 12: `LocalFileStorage` Atomic Write & Path Traversal Defense
 
 ### Practice Questions
-- Q1.2, Q1.4, Q5.1, Q5.2, Q6.1, Q6.2, Q7.1
+- Q1.2, Q1.4, Q5.1, Q5.2, Q5.7, Q6.1, Q6.2, Q7.1
 
 ### Verification Exercise
-1. Trace why `https://en.wikipedia.org/wiki/Porsche_911` succeeds while `https://www.magnific.com/free-psd/silver-sedan-car_3993591.htm` fails with `NO_IMAGE_FOUND`.
-2. Inspect `tests/IntegrationTests/Fixtures/Images/` and trace which exact stage in `ImageValidator` catches `html-masquerade.jpg`, `vector.svg`, `decompression-bomb.png`, `corrupted.jpg`, and `too-small.png`.
+1. Trace how a masquerading URL `/photo.jpg` that returns HTML is handled: `DirectImageRetriever` fetches 1 KB, `IsHtmlResponse` detects HTML tags, routes to `HtmlImageRetriever`; with 0 candidates found, `RetrievalOrchestrator` catches `NO_IMAGE_FOUND` and rethrows `UNSUPPORTED_CONTENT_TYPE`.
+2. Trace a Google Drive sharing URL `https://drive.google.com/file/d/1A2B3C4D5E/view` through `RetrievalOrchestrator` -> `GoogleDriveImageRetriever.TryExtractFileId` -> direct download endpoint -> `ImageValidator`.
 
 ---
 

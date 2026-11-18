@@ -94,7 +94,8 @@ public sealed partial class HtmlImageRetriever
                 var (fetched, _) = await _directRetriever.FetchWithRetriesAsync(
                     candidate.Url,
                     "Html",
-                    cancellationToken);
+                    cancellationToken,
+                    allowHtml: false);
 
                 retrieved = new RetrievedImage
                 {

@@ -4,6 +4,7 @@ using System.Security.Authentication;
 using Microsoft.Extensions.Options;
 using VehicleImage.Api.Configuration;
 using VehicleImage.Api.Exceptions;
+using VehicleImage.Api.ImageProcessing;
 using VehicleImage.Api.Models;
 using VehicleImage.Api.Security;
 
@@ -12,6 +13,7 @@ namespace VehicleImage.Api.Retrieval;
 public sealed class DirectImageRetriever
 {
     public const string HttpClientName = "ImageRetrievalClient";
+    internal const int ClassificationPrefixBytes = 1024;
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly UrlValidator _urlValidator;
@@ -36,7 +38,8 @@ public sealed class DirectImageRetriever
     internal async Task<(RetrievedImage Image, string? Charset)> FetchWithRetriesAsync(
         Uri source,
         string strategyName,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowHtml = true)
     {
         ArgumentNullException.ThrowIfNull(source);
 
@@ -48,7 +51,7 @@ public sealed class DirectImageRetriever
             attempt++;
             try
             {
-                return await ExecuteSingleFetchAsync(source, strategyName, cancellationToken);
+                return await ExecuteSingleFetchAsync(source, strategyName, allowHtml, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -121,6 +124,7 @@ public sealed class DirectImageRetriever
     private async Task<(RetrievedImage Image, string? Charset)> ExecuteSingleFetchAsync(
         Uri source,
         string strategyName,
+        bool allowHtml,
         CancellationToken cancellationToken)
     {
         Uri currentUri = _urlValidator.Validate(source.OriginalString);
@@ -186,8 +190,10 @@ public sealed class DirectImageRetriever
                 string? mediaType = response.Content.Headers.ContentType?.MediaType;
                 string? charSet = response.Content.Headers.ContentType?.CharSet;
 
-                MemoryStream buffer = await ReadBoundedStreamAsync(
+                MemoryStream buffer = await ReadBoundedWithClassificationAsync(
                     response.Content,
+                    mediaType,
+                    allowHtml,
                     _retrievalOptions.MaxDownloadBytes,
                     effectiveToken,
                     cancellationToken);
@@ -262,18 +268,70 @@ public sealed class DirectImageRetriever
         }
     }
 
-    private static async Task<MemoryStream> ReadBoundedStreamAsync(
+    private static async Task<MemoryStream> ReadBoundedWithClassificationAsync(
         HttpContent content,
+        string? mediaType,
+        bool allowHtml,
         long maxBytes,
         CancellationToken effectiveToken,
         CancellationToken callerToken)
     {
-        var memoryStream = new MemoryStream();
+        MemoryStream? memoryStream = null;
         try
         {
             await using Stream networkStream = await content.ReadAsStreamAsync(effectiveToken);
             byte[] chunk = new byte[16 * 1024];
+            int prefixCap = Math.Min(ClassificationPrefixBytes, chunk.Length);
+            int prefixCount = 0;
             long totalRead = 0;
+
+            while (prefixCount < prefixCap)
+            {
+                int bytesRead = await networkStream.ReadAsync(
+                    chunk.AsMemory(prefixCount, prefixCap - prefixCount),
+                    effectiveToken);
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+
+                totalRead += bytesRead;
+                if (totalRead > maxBytes)
+                {
+                    throw ImageIngestionException.ImageTooLarge(maxBytes);
+                }
+
+                prefixCount += bytesRead;
+            }
+
+            if (prefixCount == 0)
+            {
+                return new MemoryStream(0);
+            }
+
+            ReadOnlySpan<byte> prefix = chunk.AsSpan(0, prefixCount);
+            if (ImageValidator.TryMatchBinaryImageSignature(
+                prefix,
+                out _,
+                out _,
+                out _,
+                out string? unsupportedFormatName))
+            {
+                if (unsupportedFormatName is not null)
+                {
+                    throw ImageIngestionException.UnsupportedImageFormat(unsupportedFormatName);
+                }
+            }
+            else if (!allowHtml || !RetrievalOrchestrator.IsHtmlPayload(mediaType, prefix))
+            {
+                throw ImageValidator.IsLikelyTextMarkupOrJson(prefix)
+                    ? ImageIngestionException.UnsupportedContentType(
+                        "The retrieved resource is HTML, XML, SVG or JSON rather than a binary image.")
+                    : ImageIngestionException.UnsupportedContentType();
+            }
+
+            memoryStream = new MemoryStream();
+            memoryStream.Write(chunk, 0, prefixCount);
 
             while (true)
             {
@@ -297,22 +355,22 @@ public sealed class DirectImageRetriever
         }
         catch (OperationCanceledException) when (callerToken.IsCancellationRequested)
         {
-            memoryStream.Dispose();
+            memoryStream?.Dispose();
             throw;
         }
         catch (OperationCanceledException ex)
         {
-            memoryStream.Dispose();
+            memoryStream?.Dispose();
             throw ImageIngestionException.RequestTimeout(inner: ex);
         }
         catch (ImageIngestionException)
         {
-            memoryStream.Dispose();
+            memoryStream?.Dispose();
             throw;
         }
         catch (Exception ex)
         {
-            memoryStream.Dispose();
+            memoryStream?.Dispose();
             throw ImageIngestionException.ImageDecodeFailed(
                 "The image transfer was interrupted before completion.",
                 isTransient: true,
